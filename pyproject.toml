@@ -1,0 +1,51 @@
+[project]
+name = "home-weather-hub"
+version = "0.1.0"
+description = "Local-network climate dashboard ingesting Tempest UDP and Zigbee/MQTT data."
+authors = [
+    { name = "Tommy Doerr", email = "tommy.b.doerr@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+tempest-listener = "home_weather_hub.tempest_listener:main"
+
+[build-system]
+requires = ["uv_build>=0.10.4,<0.11.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.3.0",
+    "ruff>=0.15.12",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # isort
+    "B",        # flake8-bugbear
+    "UP",       # pyupgrade
+    "SIM",      # flake8-simplify
+    "RUF",      # ruff-specific
+]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "unit: pure-function tests with no sockets or subprocesses (fast)",
+    "integration: real asyncio UDP endpoint on a free port; touches the network stack",
+    "e2e: spawns the tempest-listener subprocess end-to-end",
+]
