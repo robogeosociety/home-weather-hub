@@ -130,5 +130,39 @@ class Aggregator:
             conn.execute("ROLLBACK")
             raise
 
+    def upsert_station_metadata(
+        self,
+        sensor_id: str,
+        kind: str,
+        label: str | None = None,
+        location: str | None = None,
+        latitude: float | None = None,
+        longitude: float | None = None,
+        ts: int | None = None,
+    ) -> None:
+        """Seed or update a sensor's static metadata (label, location, lat/lng).
+
+        Per-packet writes via record()/record_strike() never overwrite these
+        fields — they only bump last_seen and refuse to clobber an existing
+        location. Use this from listener startup after loading station config.
+        """
+        conn = self._conn
+        seed_ts = ts if ts is not None else int(datetime.now(UTC).timestamp())
+        conn.execute(
+            """
+            INSERT INTO sensors
+                (sensor_id, kind, label, location, latitude, longitude,
+                 first_seen, last_seen)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(sensor_id) DO UPDATE SET
+                kind      = excluded.kind,
+                label     = COALESCE(excluded.label, sensors.label),
+                location  = COALESCE(excluded.location, sensors.location),
+                latitude  = COALESCE(excluded.latitude, sensors.latitude),
+                longitude = COALESCE(excluded.longitude, sensors.longitude)
+            """,
+            (sensor_id, kind, label, location, latitude, longitude, seed_ts, seed_ts),
+        )
+
     def close(self) -> None:
         self._conn.close()

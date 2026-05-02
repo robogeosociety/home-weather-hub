@@ -160,6 +160,80 @@ def test_two_strikes_at_different_ts_both_persist(agg: Aggregator) -> None:
     assert [(r["distance_km"], r["energy"]) for r in rows] == [(8.0, 1000), (9.5, 2000)]
 
 
+def test_upsert_station_metadata_seeds_lat_lng(agg: Aggregator) -> None:
+    agg.upsert_station_metadata(
+        sensor_id="tempest:ST-1",
+        kind="tempest",
+        label="Backyard",
+        location="outside",
+        latitude=47.6062,
+        longitude=-122.3321,
+    )
+    row = agg._conn.execute("SELECT label, location, latitude, longitude FROM sensors").fetchone()
+    assert row["label"] == "Backyard"
+    assert row["location"] == "outside"
+    assert row["latitude"] == pytest.approx(47.6062)
+    assert row["longitude"] == pytest.approx(-122.3321)
+
+
+def test_record_does_not_clobber_seeded_metadata(agg: Aggregator) -> None:
+    seed_ts = _epoch(2026, 5, 1)
+    agg.upsert_station_metadata(
+        sensor_id="tempest:ST-1",
+        kind="tempest",
+        label="Backyard",
+        location="outside",
+        latitude=47.6062,
+        longitude=-122.3321,
+        ts=seed_ts,
+    )
+    ts = _epoch(2026, 5, 2)
+    # Per-packet record passes None for label/lat/lng — must not wipe seeded values.
+    agg.record("tempest:ST-1", "tempest", None, "air_temp_c", 18.0, ts)
+    row = agg._conn.execute(
+        "SELECT label, location, latitude, longitude, first_seen, last_seen FROM sensors"
+    ).fetchone()
+    assert row["label"] == "Backyard"
+    assert row["location"] == "outside"
+    assert row["latitude"] == pytest.approx(47.6062)
+    assert row["longitude"] == pytest.approx(-122.3321)
+    assert row["first_seen"] == seed_ts
+    assert row["last_seen"] == ts  # bumped to packet time
+
+
+def test_strikes_with_location_view_joins_to_sensors(agg: Aggregator) -> None:
+    agg.upsert_station_metadata(
+        sensor_id="tempest:ST-1",
+        kind="tempest",
+        location="outside",
+        latitude=47.6062,
+        longitude=-122.3321,
+    )
+    ts = _epoch(2026, 5, 2, 14, 30)
+    agg.record_strike("tempest:ST-1", "tempest", None, ts, 12.0, 4567)
+    row = agg._conn.execute(
+        "SELECT distance_km, station_latitude, station_longitude, station_location "
+        "FROM strikes_with_location"
+    ).fetchone()
+    assert row["distance_km"] == 12.0
+    assert row["station_latitude"] == pytest.approx(47.6062)
+    assert row["station_longitude"] == pytest.approx(-122.3321)
+    assert row["station_location"] == "outside"
+
+
+def test_upsert_station_metadata_is_partial_update(agg: Aggregator) -> None:
+    """Calling twice with different fields merges — None in the second call doesn't
+    null out fields that were set in the first."""
+    agg.upsert_station_metadata(
+        sensor_id="tempest:ST-1", kind="tempest", latitude=47.0, longitude=-122.0
+    )
+    agg.upsert_station_metadata(sensor_id="tempest:ST-1", kind="tempest", label="Backyard")
+    row = agg._conn.execute("SELECT label, latitude, longitude FROM sensors").fetchone()
+    assert row["label"] == "Backyard"
+    assert row["latitude"] == 47.0
+    assert row["longitude"] == -122.0
+
+
 def test_mean_derivable_from_sum_and_count(agg: Aggregator) -> None:
     base = _epoch(2026, 5, 2, 10)
     for i, v in enumerate([10.0, 20.0, 30.0]):

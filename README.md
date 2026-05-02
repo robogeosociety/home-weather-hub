@@ -47,8 +47,26 @@ Stop with `Ctrl-C`; SIGINT/SIGTERM trigger a clean drain + close. Each `obs_st` 
 | `daily_aggregates` | `(day, sensor, metric)` | min/max/sum/count + min_ts/max_ts; updated incrementally |
 | `monthly_aggregates` | `(year_month, sensor, metric)` | same shape, monthly bucket |
 | `lightning_strikes` | one row per `evt_strike` packet | per-strike `distance_km` (from station — Tempest reports no bearing) and unitless `energy` |
+| `strikes_with_location` (view) | per strike, joined to sensor lat/lng | what the dashboard reads to render strikes as a circle around the station |
 
 Mean = `sum_value / count`. The aggregator uses `INSERT OR IGNORE` on observations so duplicate `(sensor, metric, ts)` records don't double-count in the rollups. Strikes are idempotent on `(sensor_id, ts)`. Future MQTT/Zigbee data drops into the same tables — no schema changes.
+
+### Station config (lat/lng)
+
+Per-host station metadata lives in `config/stations.toml` (gitignored — copy from `config/stations.example.toml`). The listener reads it at startup and seeds the `sensors` table; per-packet writes use `COALESCE` so they never clobber the seeded label/location/lat/lng.
+
+```toml
+# config/stations.toml
+[[stations]]
+sensor_id = "tempest:ST-00027770"
+kind      = "tempest"
+label     = "Backyard Tempest"
+location  = "outside"
+latitude  = 47.6062
+longitude = -122.3321
+```
+
+The Tempest itself reports strike distance only (no bearing), so the station's known coordinates are the only spatial anchor — they let the dashboard render a strike as `(station_lat, station_lng) ± distance_km`. Pass `--stations <path>` to the listener to override.
 
 Inspect with the bundled CLI or plain `sqlite3`:
 

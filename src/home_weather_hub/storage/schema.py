@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS sensors (
     kind        TEXT NOT NULL,
     label       TEXT,
     location    TEXT,
+    latitude    REAL,
+    longitude   REAL,
     first_seen  INTEGER NOT NULL,
     last_seen   INTEGER NOT NULL
 );
@@ -63,7 +65,31 @@ CREATE TABLE IF NOT EXISTS lightning_strikes (
 ) WITHOUT ROWID;
 
 CREATE INDEX IF NOT EXISTS idx_strikes_ts ON lightning_strikes(ts);
+
+-- Convenience view: each strike with the station's configured lat/lng so the
+-- dashboard can render strikes as a circle (radius = distance_km) without
+-- joining to sensors itself. Tempest reports no bearing.
+CREATE VIEW IF NOT EXISTS strikes_with_location AS
+SELECT
+    s.ts,
+    s.sensor_id,
+    s.distance_km,
+    s.energy,
+    sn.latitude  AS station_latitude,
+    sn.longitude AS station_longitude,
+    sn.location  AS station_location
+FROM lightning_strikes AS s
+LEFT JOIN sensors AS sn USING (sensor_id);
 """
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Add columns introduced after the initial schema. Cheap to run on every open."""
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(sensors)")}
+    if "latitude" not in cols:
+        conn.execute("ALTER TABLE sensors ADD COLUMN latitude REAL")
+    if "longitude" not in cols:
+        conn.execute("ALTER TABLE sensors ADD COLUMN longitude REAL")
 
 
 def open_db(path: Path | str) -> sqlite3.Connection:
@@ -77,4 +103,5 @@ def open_db(path: Path | str) -> sqlite3.Connection:
         conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return conn

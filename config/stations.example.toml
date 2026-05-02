@@ -1,0 +1,19 @@
+# Copy to config/stations.toml and fill in real values.
+# Loaded by tempest-listener at startup; missing file is OK (no seeding).
+# All fields except sensor_id and kind are optional.
+
+[[stations]]
+sensor_id = "tempest:ST-00027770"
+kind      = "tempest"
+label     = "Backyard Tempest"
+location  = "outside"
+latitude  = 47.6062
+longitude = -122.3321
+
+# Future Zigbee/MQTT sensors will follow the same shape:
+#
+# [[stations]]
+# sensor_id = "snzb:0xa4c138aabbccdd"
+# kind      = "snzb-02wd"
+# label     = "Living Room"
+# location  = "living_room"

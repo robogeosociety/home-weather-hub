@@ -13,6 +13,7 @@ from collections.abc import Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+from home_weather_hub.config import load_stations
 from home_weather_hub.decoders.tempest import decode_evt_strike, decode_obs_st
 from home_weather_hub.storage import Aggregator, open_db
 
@@ -20,6 +21,7 @@ DEFAULT_PORT = 50222
 DEFAULT_FLUSH_INTERVAL_SEC = 5.0
 DEFAULT_DEDUPE_WINDOW_SEC = 2.0
 DEFAULT_DB_PATH = Path("./data/weather.db")
+DEFAULT_STATIONS_PATH = Path("./config/stations.toml")
 
 log = logging.getLogger("tempest_listener")
 
@@ -164,6 +166,7 @@ async def _run(
     flush_interval: float,
     dedupe_window: float,
     db_path: Path | None,
+    stations_path: Path | None,
 ) -> None:
     writer = JsonlWriter(data_dir)
     aggregator: Aggregator | None = None
@@ -171,6 +174,28 @@ async def _run(
         conn = open_db(db_path)
         aggregator = Aggregator(conn)
         log.info("aggregating to %s", db_path)
+        if stations_path is not None:
+            stations = load_stations(stations_path)
+            for s in stations:
+                aggregator.upsert_station_metadata(
+                    sensor_id=s.sensor_id,
+                    kind=s.kind,
+                    label=s.label,
+                    location=s.location,
+                    latitude=s.latitude,
+                    longitude=s.longitude,
+                )
+            if stations:
+                log.info(
+                    "seeded %d station(s) from %s: %s",
+                    len(stations),
+                    stations_path,
+                    ", ".join(s.sensor_id for s in stations),
+                )
+            elif stations_path.exists():
+                log.info("no [[stations]] in %s", stations_path)
+            else:
+                log.info("no station config at %s (skipping)", stations_path)
     loop = asyncio.get_running_loop()
     transport, _ = await loop.create_datagram_endpoint(
         lambda: TempestProtocol(writer, aggregator=aggregator, dedupe_window_sec=dedupe_window),
@@ -216,6 +241,13 @@ def main() -> None:
         action="store_true",
         help="Disable the SQLite aggregator entirely (JSONL only).",
     )
+    parser.add_argument(
+        "--stations",
+        type=Path,
+        default=DEFAULT_STATIONS_PATH,
+        help="TOML file describing each station's sensor_id, label, location, lat/lng. "
+        "Loaded once at startup; missing file is OK (no seeding).",
+    )
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args()
 
@@ -224,7 +256,17 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     db_path = None if args.no_db else args.db_path
-    asyncio.run(_run(args.port, args.data_dir, args.flush_interval, args.dedupe_window, db_path))
+    stations_path = None if db_path is None else args.stations
+    asyncio.run(
+        _run(
+            args.port,
+            args.data_dir,
+            args.flush_interval,
+            args.dedupe_window,
+            db_path,
+            stations_path,
+        )
+    )
 
 
 if __name__ == "__main__":
