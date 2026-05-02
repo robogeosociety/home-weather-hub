@@ -16,7 +16,21 @@ The deployment target (Mac Mini M1, LAN-only, Apple Silicon container runtime) s
 
 - **Python 3.12+** managed by **`uv`** for the ingest side (UDP listener, MQTT subscriber, eventually the dashboard backend). Single src-layout package: `src/home_weather_hub/`.
 - The dashboard frontend is not yet built; if/when added it will likely be Vite (the gitignore is already Vite-flavored).
-- Captured raw data lands in `./data/*.jsonl` (gitignored), one packet per line, daily-rotated.
+- Captured raw data lands in `./data/*.jsonl` (gitignored), one packet per line, daily-rotated. Decoded `obs_st` values also flow into a SQLite store at `./data/weather.db` (see below).
+
+## Storage architecture
+
+Two parallel sinks. JSONL is the immutable audit/replay corpus; SQLite is the query surface for the dashboard.
+
+- **JSONL** (`data/tempest-YYYY-MM-DD.jsonl`) — raw packets wrapped in `{received_at, src_addr, payload}`. Captures everything (`obs_st`, `rapid_wind`, `hub_status`, `device_status`, events). Replayable.
+- **SQLite WAL** (`data/weather.db`) — four tables, all keyed on a sensor-agnostic `(sensor_id, metric)` schema so future Zigbee/MQTT data drops in without migrations:
+  - `sensors` — catalog (`tempest:<serial>`, `snzb:<ieee>`); kind, location, first/last seen.
+  - `observations` — one row per `(sensor_id, metric, ts)`. Currently only `obs_st` decoded fields (14 metrics: wind lull/avg/gust/dir, pressure, air_temp_c, humidity_pct, illuminance_lux, uv_index, solar_w_m2, rain_mm, lightning_avg_km, lightning_count, battery_v).
+  - `daily_aggregates` and `monthly_aggregates` — `(min_value, max_value, sum_value, count, min_ts, max_ts)` per `(bucket, sensor, metric)`. Updated incrementally via `INSERT...ON CONFLICT DO UPDATE` on every `obs_st` packet, inside a single transaction. Mean is `sum_value / count`.
+
+The aggregator skips rollup updates when `INSERT OR IGNORE` on `observations` reports `rowcount == 0`, so duplicate-keyed records don't double-count. `rapid_wind` and event packets stay JSONL-only — `obs_st` already summarizes wind for min/max/mean and event counts aren't a scalar metric. Disable the SQLite sink with `--no-db` for replay or capture-only runs.
+
+Inspect via `uv run tempest-stats [--month YYYY-MM | --last-days N] [--metric ...] [--sensor ...]` or directly with `sqlite3 data/weather.db`.
 
 ## Tempest UDP listener
 
@@ -26,8 +40,9 @@ Run it:
 
 ```sh
 uv sync                              # first time only
-uv run tempest-listener              # writes to ./data
-uv run tempest-listener --port 50222 --data-dir ./data --log-level INFO
+uv run tempest-listener              # writes JSONL + ./data/weather.db
+uv run tempest-listener --no-db      # skip the aggregate DB
+uv run tempest-listener --port 50222 --data-dir ./data --db-path ./data/weather.db
 ```
 
 The Tempest hub on Tommy's LAN is at **192.168.4.20** (`HB-00208576`). The hub broadcasts `hub_status` every ~10s regardless of device state. If `obs_st` (60s) and `rapid_wind` (3s) are absent, **the Tempest device itself isn't transmitting** — check the WeatherFlow app for battery/radio link before assuming a listener bug.
