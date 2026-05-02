@@ -8,11 +8,14 @@ import json
 import logging
 import signal
 import socket
+import time
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
 
 DEFAULT_PORT = 50222
 DEFAULT_FLUSH_INTERVAL_SEC = 5.0
+DEFAULT_DEDUPE_WINDOW_SEC = 2.0
 
 log = logging.getLogger("tempest_listener")
 
@@ -55,15 +58,46 @@ class JsonlWriter:
 
 
 class TempestProtocol(asyncio.DatagramProtocol):
-    def __init__(self, writer: JsonlWriter):
+    def __init__(
+        self,
+        writer: JsonlWriter,
+        dedupe_window_sec: float = DEFAULT_DEDUPE_WINDOW_SEC,
+        time_source: Callable[[], float] = time.monotonic,
+    ):
         self._writer = writer
         self._packet_count = 0
+        self._dropped_dups = 0
+        self._dedupe_window = dedupe_window_sec
+        self._time = time_source
+        # Maps raw datagram bytes -> expiry time (monotonic seconds).
+        self._recent: dict[bytes, float] = {}
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
         sock = transport.get_extra_info("socket")
         log.info("listening on %s", sock.getsockname())
 
+    def _is_duplicate(self, data: bytes) -> bool:
+        # Hosts with multiple interfaces on the same broadcast domain receive each
+        # broadcast once per receiving interface; drop bytewise-identical replays
+        # that arrive within the dedupe window.
+        if self._dedupe_window <= 0:
+            return False
+        now = self._time()
+        if self._recent:
+            expired = [k for k, exp in self._recent.items() if exp <= now]
+            for k in expired:
+                del self._recent[k]
+        if data in self._recent:
+            return True
+        self._recent[data] = now + self._dedupe_window
+        return False
+
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
+        if self._is_duplicate(data):
+            self._dropped_dups += 1
+            if self._dropped_dups % 100 == 1:
+                log.info("dropped %d duplicate packet(s) so far", self._dropped_dups)
+            return
         try:
             payload = json.loads(data)
         except json.JSONDecodeError as e:
@@ -92,11 +126,11 @@ async def _flush_loop(writer: JsonlWriter, interval: float) -> None:
         writer.flush()
 
 
-async def _run(port: int, data_dir: Path, flush_interval: float) -> None:
+async def _run(port: int, data_dir: Path, flush_interval: float, dedupe_window: float) -> None:
     writer = JsonlWriter(data_dir)
     loop = asyncio.get_running_loop()
     transport, _ = await loop.create_datagram_endpoint(
-        lambda: TempestProtocol(writer),
+        lambda: TempestProtocol(writer, dedupe_window_sec=dedupe_window),
         local_addr=("0.0.0.0", port),
         family=socket.AF_INET,
         allow_broadcast=True,
@@ -120,6 +154,12 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--data-dir", type=Path, default=Path("./data"))
     parser.add_argument("--flush-interval", type=float, default=DEFAULT_FLUSH_INTERVAL_SEC)
+    parser.add_argument(
+        "--dedupe-window",
+        type=float,
+        default=DEFAULT_DEDUPE_WINDOW_SEC,
+        help="Drop bytewise-identical packets seen within this many seconds. Set to 0 to disable.",
+    )
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args()
 
@@ -127,7 +167,7 @@ def main() -> None:
         level=args.log_level.upper(),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    asyncio.run(_run(args.port, args.data_dir, args.flush_interval))
+    asyncio.run(_run(args.port, args.data_dir, args.flush_interval, args.dedupe_window))
 
 
 if __name__ == "__main__":
