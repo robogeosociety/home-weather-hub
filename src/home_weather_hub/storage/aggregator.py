@@ -106,5 +106,29 @@ class Aggregator:
             conn.execute("ROLLBACK")
             raise
 
+    def record_strike(
+        self,
+        sensor_id: str,
+        kind: str,
+        location: str | None,
+        ts: int,
+        distance_km: float,
+        energy: int,
+    ) -> None:
+        """Persist a single lightning strike. Idempotent on (sensor_id, ts)."""
+        conn = self._conn
+        conn.execute("BEGIN")
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO lightning_strikes "
+                "(ts, sensor_id, distance_km, energy) VALUES (?, ?, ?, ?)",
+                (ts, sensor_id, distance_km, energy),
+            )
+            conn.execute(_UPSERT_SENSOR, (sensor_id, kind, location, ts, ts))
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
     def close(self) -> None:
         self._conn.close()

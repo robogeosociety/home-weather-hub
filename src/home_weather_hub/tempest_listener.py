@@ -13,7 +13,7 @@ from collections.abc import Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-from home_weather_hub.decoders.tempest import decode_obs_st
+from home_weather_hub.decoders.tempest import decode_evt_strike, decode_obs_st
 from home_weather_hub.storage import Aggregator, open_db
 
 DEFAULT_PORT = 50222
@@ -125,16 +125,31 @@ class TempestProtocol(asyncio.DatagramProtocol):
                 addr[0],
             )
         if self._aggregator and isinstance(payload, dict):
-            decoded = decode_obs_st(payload)
-            if decoded:
-                sensor_id, ts, metrics = decoded
-                if metrics:
-                    try:
-                        self._aggregator.record_many(
-                            (sensor_id, "tempest", None, name, value, ts) for name, value in metrics
-                        )
-                    except Exception:
-                        log.exception("aggregator failed for packet from %s", addr[0])
+            try:
+                self._aggregate_payload(payload, addr[0])
+            except Exception:
+                log.exception("aggregator failed for packet from %s", addr[0])
+
+    def _aggregate_payload(self, payload: dict, src: str) -> None:
+        assert self._aggregator is not None
+        obs = decode_obs_st(payload)
+        if obs is not None:
+            sensor_id, ts, metrics = obs
+            if metrics:
+                self._aggregator.record_many(
+                    (sensor_id, "tempest", None, name, value, ts) for name, value in metrics
+                )
+            return
+        strike = decode_evt_strike(payload)
+        if strike is not None:
+            sensor_id, ts, distance_km, energy = strike
+            self._aggregator.record_strike(sensor_id, "tempest", None, ts, distance_km, energy)
+            log.info(
+                "lightning strike from %s: %.1f km, energy=%d",
+                src,
+                distance_km,
+                energy,
+            )
 
 
 async def _flush_loop(writer: JsonlWriter, interval: float) -> None:

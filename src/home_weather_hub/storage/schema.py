@@ -50,6 +50,19 @@ CREATE TABLE IF NOT EXISTS monthly_aggregates (
     max_ts      INTEGER NOT NULL,
     PRIMARY KEY (year_month, sensor_id, metric)
 ) WITHOUT ROWID;
+
+-- One row per evt_strike packet. Tempest reports distance from the station
+-- (no bearing) and a unitless energy estimate. There is no spatial location;
+-- placing strikes on a map requires the station's known lat/lon.
+CREATE TABLE IF NOT EXISTS lightning_strikes (
+    ts          INTEGER NOT NULL,
+    sensor_id   TEXT    NOT NULL,
+    distance_km REAL    NOT NULL,
+    energy      INTEGER NOT NULL,
+    PRIMARY KEY (sensor_id, ts)
+) WITHOUT ROWID;
+
+CREATE INDEX IF NOT EXISTS idx_strikes_ts ON lightning_strikes(ts);
 """
 
 

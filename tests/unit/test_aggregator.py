@@ -127,6 +127,39 @@ def test_duplicate_observations_are_idempotent(agg: Aggregator) -> None:
     assert row["sum_value"] == 18.0
 
 
+def test_record_strike_persists_individual_strike(agg: Aggregator) -> None:
+    ts = _epoch(2026, 5, 2, 14, 30)
+    agg.record_strike("tempest:ST-1", "tempest", "outside", ts, 12.5, 4567)
+    row = agg._conn.execute(
+        "SELECT ts, sensor_id, distance_km, energy FROM lightning_strikes"
+    ).fetchone()
+    assert row["ts"] == ts
+    assert row["sensor_id"] == "tempest:ST-1"
+    assert row["distance_km"] == 12.5
+    assert row["energy"] == 4567
+    sensor = agg._conn.execute("SELECT kind, location FROM sensors").fetchone()
+    assert sensor["kind"] == "tempest"
+    assert sensor["location"] == "outside"
+
+
+def test_record_strike_is_idempotent_on_sensor_ts(agg: Aggregator) -> None:
+    ts = _epoch(2026, 5, 2, 14, 30)
+    agg.record_strike("tempest:ST-1", "tempest", None, ts, 12.5, 4567)
+    agg.record_strike("tempest:ST-1", "tempest", None, ts, 12.5, 4567)
+    n = agg._conn.execute("SELECT COUNT(*) AS n FROM lightning_strikes").fetchone()["n"]
+    assert n == 1
+
+
+def test_two_strikes_at_different_ts_both_persist(agg: Aggregator) -> None:
+    base = _epoch(2026, 5, 2, 14, 30)
+    agg.record_strike("tempest:ST-1", "tempest", None, base, 8.0, 1000)
+    agg.record_strike("tempest:ST-1", "tempest", None, base + 5, 9.5, 2000)
+    rows = agg._conn.execute(
+        "SELECT distance_km, energy FROM lightning_strikes ORDER BY ts"
+    ).fetchall()
+    assert [(r["distance_km"], r["energy"]) for r in rows] == [(8.0, 1000), (9.5, 2000)]
+
+
 def test_mean_derivable_from_sum_and_count(agg: Aggregator) -> None:
     base = _epoch(2026, 5, 2, 10)
     for i, v in enumerate([10.0, 20.0, 30.0]):

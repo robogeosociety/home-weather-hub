@@ -46,8 +46,9 @@ Stop with `Ctrl-C`; SIGINT/SIGTERM trigger a clean drain + close. Each `obs_st` 
 | `observations` | one row per `(sensor, metric, ts)` | per-sample raw decoded values (Tempest `obs_st` fields) |
 | `daily_aggregates` | `(day, sensor, metric)` | min/max/sum/count + min_ts/max_ts; updated incrementally |
 | `monthly_aggregates` | `(year_month, sensor, metric)` | same shape, monthly bucket |
+| `lightning_strikes` | one row per `evt_strike` packet | per-strike `distance_km` (from station — Tempest reports no bearing) and unitless `energy` |
 
-Mean = `sum_value / count`. The aggregator uses `INSERT OR IGNORE` on observations so duplicate `(sensor, metric, ts)` records don't double-count in the rollups. Future MQTT/Zigbee data drops into the same tables — no schema changes.
+Mean = `sum_value / count`. The aggregator uses `INSERT OR IGNORE` on observations so duplicate `(sensor, metric, ts)` records don't double-count in the rollups. Strikes are idempotent on `(sensor_id, ts)`. Future MQTT/Zigbee data drops into the same tables — no schema changes.
 
 Inspect with the bundled CLI or plain `sqlite3`:
 
@@ -56,6 +57,8 @@ uv run tempest-stats                                    # current month, all met
 uv run tempest-stats --month 2026-04                    # specific month
 uv run tempest-stats --metric air_temp_c                # one metric
 uv run tempest-stats --last-days 30 --metric air_temp_c # daily series
+uv run tempest-stats --strikes                          # all individual strikes (newest first)
+uv run tempest-stats --strikes --last-days 7            # strikes in the last week
 sqlite3 data/weather.db "SELECT * FROM monthly_aggregates LIMIT 10"
 ```
 

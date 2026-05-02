@@ -110,6 +110,56 @@ async def test_listener_writes_obs_st_to_db_and_jsonl(free_udp_port: int, tmp_pa
         conn2.close()
 
 
+async def test_listener_persists_evt_strike_to_db(free_udp_port: int, tmp_path: Path) -> None:
+    db_path = tmp_path / "weather.db"
+    conn = open_db(db_path)
+    aggregator = Aggregator(conn)
+    writer = JsonlWriter(tmp_path)
+
+    loop = asyncio.get_running_loop()
+    transport, _ = await loop.create_datagram_endpoint(
+        lambda: TempestProtocol(writer, aggregator=aggregator, dedupe_window_sec=0.0),
+        local_addr=("127.0.0.1", free_udp_port),
+        family=socket.AF_INET,
+        allow_broadcast=True,
+    )
+    try:
+        ts = int(datetime(2026, 5, 2, 14, 30, tzinfo=UTC).timestamp())
+        strike = json.dumps(
+            {
+                "type": "evt_strike",
+                "serial_number": "ST-STRIKE",
+                "hub_sn": "HB-1",
+                "evt": [ts, 12, 4567],
+            }
+        ).encode()
+        _send_udp(strike, free_udp_port)
+
+        for _ in range(50):
+            await asyncio.sleep(0.01)
+            n = conn.execute("SELECT COUNT(*) AS n FROM lightning_strikes").fetchone()["n"]
+            if n == 1:
+                break
+        else:
+            pytest.fail("strike did not reach lightning_strikes table")
+    finally:
+        transport.close()
+        writer.close()
+        aggregator.close()
+
+    conn2 = open_db(db_path)
+    try:
+        row = conn2.execute(
+            "SELECT ts, sensor_id, distance_km, energy FROM lightning_strikes"
+        ).fetchone()
+        assert row["ts"] == ts
+        assert row["sensor_id"] == "tempest:ST-STRIKE"
+        assert row["distance_km"] == 12.0
+        assert row["energy"] == 4567
+    finally:
+        conn2.close()
+
+
 async def test_listener_with_no_aggregator_still_writes_jsonl(
     free_udp_port: int, tmp_path: Path
 ) -> None:

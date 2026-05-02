@@ -27,8 +27,9 @@ Two parallel sinks. JSONL is the immutable audit/replay corpus; SQLite is the qu
   - `sensors` — catalog (`tempest:<serial>`, `snzb:<ieee>`); kind, location, first/last seen.
   - `observations` — one row per `(sensor_id, metric, ts)`. Currently only `obs_st` decoded fields (14 metrics: wind lull/avg/gust/dir, pressure, air_temp_c, humidity_pct, illuminance_lux, uv_index, solar_w_m2, rain_mm, lightning_avg_km, lightning_count, battery_v).
   - `daily_aggregates` and `monthly_aggregates` — `(min_value, max_value, sum_value, count, min_ts, max_ts)` per `(bucket, sensor, metric)`. Updated incrementally via `INSERT...ON CONFLICT DO UPDATE` on every `obs_st` packet, inside a single transaction. Mean is `sum_value / count`.
+  - `lightning_strikes` — one row per `evt_strike` packet (`ts, sensor_id, distance_km, energy`), idempotent on `(sensor_id, ts)`. Tempest reports distance from the station and a unitless energy estimate only — **no bearing**, so individual strikes can't be placed on a map without combining with the station's known lat/lon (and even then only as a radius). The `obs_st.lightning_count` / `lightning_avg_km` minute aggregates also still flow into the rollup tables.
 
-The aggregator skips rollup updates when `INSERT OR IGNORE` on `observations` reports `rowcount == 0`, so duplicate-keyed records don't double-count. `rapid_wind` and event packets stay JSONL-only — `obs_st` already summarizes wind for min/max/mean and event counts aren't a scalar metric. Disable the SQLite sink with `--no-db` for replay or capture-only runs.
+The aggregator skips rollup updates when `INSERT OR IGNORE` on `observations` reports `rowcount == 0`, so duplicate-keyed records don't double-count. `rapid_wind` and `evt_precip` packets stay JSONL-only. Disable the SQLite sink with `--no-db` for replay or capture-only runs.
 
 Inspect via `uv run tempest-stats [--month YYYY-MM | --last-days N] [--metric ...] [--sensor ...]` or directly with `sqlite3 data/weather.db`.
 

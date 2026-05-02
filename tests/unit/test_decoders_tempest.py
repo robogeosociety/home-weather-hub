@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from home_weather_hub.decoders.tempest import OBS_ST_METRICS, decode_obs_st
+from home_weather_hub.decoders.tempest import (
+    OBS_ST_METRICS,
+    decode_evt_strike,
+    decode_obs_st,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -96,3 +100,31 @@ def test_decode_truncated_obs_array_only_yields_present_metrics() -> None:
     assert result is not None
     names = [m for m, _ in result[2]]
     assert names == ["wind_lull_mps", "wind_avg_mps", "wind_gust_mps", "wind_dir_deg"]
+
+
+def test_decode_evt_strike_well_formed() -> None:
+    payload = {
+        "type": "evt_strike",
+        "serial_number": "ST-00027770",
+        "hub_sn": "HB-00208576",
+        "evt": [1_700_000_500, 12, 4567],
+    }
+    result = decode_evt_strike(payload)
+    assert result == ("tempest:ST-00027770", 1_700_000_500, 12.0, 4567)
+
+
+def test_decode_evt_strike_returns_none_for_other_types() -> None:
+    assert decode_evt_strike({"type": "obs_st", "serial_number": "ST-1", "obs": [[]]}) is None
+    assert decode_evt_strike({"type": "evt_precip", "serial_number": "ST-1"}) is None
+
+
+def test_decode_evt_strike_handles_malformed_payload() -> None:
+    assert decode_evt_strike({"type": "evt_strike"}) is None  # no evt
+    assert decode_evt_strike({"type": "evt_strike", "evt": [1, 2, 3]}) is None  # no serial
+    assert (
+        decode_evt_strike({"type": "evt_strike", "serial_number": "ST-1", "evt": [1, 2]}) is None
+    )  # short
+    assert (
+        decode_evt_strike({"type": "evt_strike", "serial_number": "ST-1", "evt": [None, 5, 1000]})
+        is None
+    )

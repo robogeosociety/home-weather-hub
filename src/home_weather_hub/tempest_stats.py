@@ -54,6 +54,27 @@ def _query_monthly(
     return list(conn.execute(sql, args))
 
 
+def _query_strikes(
+    conn: sqlite3.Connection,
+    last_days: int | None,
+    sensor: str | None,
+) -> list[sqlite3.Row]:
+    sql = (
+        "SELECT datetime(ts, 'unixepoch') AS at, sensor_id, distance_km, energy "
+        "FROM lightning_strikes WHERE 1=1"
+    )
+    args: list = []
+    if last_days is not None:
+        cutoff = int((datetime.now(UTC) - timedelta(days=last_days)).timestamp())
+        sql += " AND ts >= ?"
+        args.append(cutoff)
+    if sensor:
+        sql += " AND sensor_id = ?"
+        args.append(sensor)
+    sql += " ORDER BY ts DESC LIMIT 500"
+    return list(conn.execute(sql, args))
+
+
 def _query_daily(
     conn: sqlite3.Connection,
     last_days: int,
@@ -91,6 +112,11 @@ def main() -> None:
     )
     parser.add_argument("--metric", help="Filter to a single metric (e.g. air_temp_c).")
     parser.add_argument("--sensor", help="Filter to a single sensor_id.")
+    parser.add_argument(
+        "--strikes",
+        action="store_true",
+        help="Show individual lightning strikes instead of metric aggregates.",
+    )
     args = parser.parse_args()
 
     if not args.db_path.exists():
@@ -98,7 +124,13 @@ def main() -> None:
 
     conn = open_db(args.db_path)
     try:
-        if args.last_days is not None:
+        if args.strikes:
+            rows = _query_strikes(conn, args.last_days, args.sensor)
+            print(
+                "# lightning strikes" + (f" (last {args.last_days} days)" if args.last_days else "")
+            )
+            _print_table(rows, ["at", "sensor_id", "distance_km", "energy"])
+        elif args.last_days is not None:
             rows = _query_daily(conn, args.last_days, args.metric, args.sensor)
             _print_table(
                 rows,

@@ -54,3 +54,30 @@ def decode_obs_st(payload: dict) -> tuple[str, int, list[tuple[str, float]]] | N
             continue
         metrics.append((name, float(val)))
     return f"tempest:{serial}", ts_int, metrics
+
+
+def decode_evt_strike(payload: dict) -> tuple[str, int, float, int] | None:
+    """Decode an `evt_strike` Tempest packet.
+
+    Returns `(sensor_id, ts, distance_km, energy)` or `None` if the payload
+    isn't an evt_strike or the `evt` array is the wrong shape. Note that the
+    Tempest reports distance from the station and a unitless energy estimate
+    only — there is no bearing, so individual strikes cannot be placed on a
+    map without combining with the station's known location.
+    """
+    if payload.get("type") != "evt_strike":
+        return None
+    serial = payload.get("serial_number")
+    if not isinstance(serial, str) or not serial:
+        return None
+    evt = payload.get("evt")
+    if not isinstance(evt, list) or len(evt) < 3:
+        return None
+    ts, distance, energy = evt[0], evt[1], evt[2]
+    if not isinstance(ts, int | float):
+        return None
+    if not isinstance(distance, int | float):
+        return None
+    if not isinstance(energy, int | float):
+        return None
+    return f"tempest:{serial}", int(ts), float(distance), int(energy)
