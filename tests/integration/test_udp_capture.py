@@ -15,11 +15,11 @@ from home_weather_hub.tempest_listener import JsonlWriter, TempestProtocol
 pytestmark = pytest.mark.integration
 
 
-async def _bring_up_listener(port: int, data_dir: Path):
+async def _bring_up_listener(port: int, data_dir: Path, dedupe_window_sec: float = 2.0):
     writer = JsonlWriter(data_dir)
     loop = asyncio.get_running_loop()
     transport, _ = await loop.create_datagram_endpoint(
-        lambda: TempestProtocol(writer),
+        lambda: TempestProtocol(writer, dedupe_window_sec=dedupe_window_sec),
         local_addr=("127.0.0.1", port),
         family=socket.AF_INET,
         allow_broadcast=True,
@@ -83,3 +83,33 @@ async def test_listener_survives_mix_of_good_and_bad_packets(
 
     types = [json.loads(line)["payload"]["type"] for line in target.read_text().splitlines()]
     assert types == ["obs_st", "rapid_wind"]
+
+
+async def test_listener_dedupes_back_to_back_identical_packets(
+    free_udp_port: int, tmp_path: Path
+) -> None:
+    """Simulates the multi-interface broadcast scenario: identical bytes arrive
+    multiple times in quick succession; only one should be persisted."""
+    transport, writer = await _bring_up_listener(free_udp_port, tmp_path, dedupe_window_sec=2.0)
+    try:
+        pkt = b'{"type":"hub_status","serial_number":"DUP-INT","seq":1}'
+        for _ in range(4):
+            _send_udp(pkt, free_udp_port)
+
+        target = tmp_path / f"tempest-{datetime.now(UTC).date().isoformat()}.jsonl"
+        for _ in range(50):
+            await asyncio.sleep(0.01)
+            writer.flush()
+            if target.exists() and target.stat().st_size > 0:
+                break
+        # Give the loop extra ticks so any *non*-deduped duplicates would land.
+        for _ in range(20):
+            await asyncio.sleep(0.01)
+            writer.flush()
+    finally:
+        transport.close()
+        writer.close()
+
+    lines = target.read_text().splitlines()
+    assert len(lines) == 1, f"expected exactly one record after dedupe, got {len(lines)}"
+    assert json.loads(lines[0])["payload"]["serial_number"] == "DUP-INT"
