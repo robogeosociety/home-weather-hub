@@ -33,6 +33,36 @@ The aggregator skips rollup updates when `INSERT OR IGNORE` on `observations` re
 
 Inspect via `uv run tempest-stats [--month YYYY-MM | --last-days N] [--metric ...] [--sensor ...]` or directly with `sqlite3 data/weather.db`.
 
+## Zigbee + MQTT subscriber
+
+`src/home_weather_hub/zigbee_subscriber.py` — `aiomqtt`-based subscriber that consumes Zigbee2MQTT topics from the LAN broker. Topology:
+
+```
+Sonoff SNZB-02WD (Zigbee)  →  ZBDongle-E (USB)  →  Zigbee2MQTT (container)
+                                                     ↓ MQTT
+                                                  Mosquitto (container)
+                                                     ↓
+                                                  zigbee-subscriber  →  data/zigbee-*.jsonl + weather.db
+```
+
+- Subscribes to `zigbee2mqtt/bridge/devices` (retained device catalogue) and `zigbee2mqtt/+` (per-device readings).
+- Maintains an in-process `friendly_name → ieee_address` map; sensor IDs are `snzb:<ieee>` so they're stable across renames.
+- Falls back to `znme:<friendly_name>` (with a one-shot WARNING) if a per-device message arrives before the catalogue.
+- JSONL daily-rotates as `data/zigbee-YYYY-MM-DD.jsonl`; envelope is `{received_at, topic, friendly_name, sensor_id, payload}`.
+- Decoded numeric fields land in `observations` + the daily/monthly rollups via the same `Aggregator` the Tempest path uses. Field map: `temperature → air_temp_c`, `humidity → humidity_pct`, `battery → battery_pct`, `voltage → battery_v` (mV → V), `linkquality → link_quality`, `pressure → pressure_mb`.
+- Per-message timestamp prefers Z2M's `last_seen` over wall-clock so day/month buckets follow the device's clock.
+
+The broker + Z2M run via `docker-compose.yml` (Mosquitto on `1883`/`9001`, Z2M web UI on `8080`). Z2M's serial port is bound from `${ZIGBEE_ADAPTER_PATH:-/dev/cu.usbserial-220}` to `/dev/ttyUSB0` inside the container, with adapter `ember` (the ZBDongle-E runs EmberZNet, not zstack). macOS dev caveat: container runtimes there can't pass through `/dev/cu.*`; either run Z2M natively on the Mac or run the whole stack on the Mac Mini deploy host.
+
+Run it:
+
+```sh
+ZIGBEE_ADAPTER_PATH=/dev/cu.usbserial-220 docker compose up -d
+uv run zigbee-subscriber                       # default 127.0.0.1:1883
+uv run zigbee-subscriber --no-db               # JSONL only
+uv run zigbee-subscriber --broker-host 192.168.4.10 --base-topic zigbee2mqtt
+```
+
 ## Tempest UDP listener
 
 `src/home_weather_hub/tempest_listener.py` — `asyncio.DatagramProtocol` bound to `0.0.0.0:50222` with `SO_REUSEADDR`/`SO_REUSEPORT`/`SO_BROADCAST`. Each datagram is JSON-decoded, wrapped with `{received_at, src_addr, payload}`, and appended to `data/tempest-<UTC-date>.jsonl`. Malformed packets log a WARNING with hex preview and are dropped, not crashed-on. SIGINT/SIGTERM trigger a clean drain + close.

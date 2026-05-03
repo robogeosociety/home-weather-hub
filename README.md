@@ -18,7 +18,7 @@ Monitor outside and inside climate and host a live dashboard on the local networ
 | `tempest-stats` CLI (`uv run tempest-stats`) | ✅ Implemented |
 | Test pyramid (unit / integration / e2e) | ✅ 35 tests, all passing |
 | Lint + format (`ruff`) | ✅ Configured |
-| Zigbee/MQTT subscriber for indoor sensors (SNZB-02WD) | ⏳ Not started — schema is sensor-agnostic and ready |
+| Zigbee/MQTT subscriber for indoor sensors (SNZB-02WD) | ✅ Implemented — `src/home_weather_hub/zigbee_subscriber.py` + `docker-compose.yml` (Mosquitto + Z2M) |
 | Dashboard web app | ⏳ Not started |
 | Containerized deployment to Mac Mini M1 | ⏳ Not started |
 | Webcam backdrop (stretch) | ⏳ Not started |
@@ -35,6 +35,35 @@ uv run tempest-listener --no-db      # JSONL only (skip the aggregate DB)
 ```
 
 Stop with `Ctrl-C`; SIGINT/SIGTERM trigger a clean drain + close. Each `obs_st` packet is JSONL-appended **and** decoded into the SQLite aggregate store; raw packets land in `./data/*.jsonl` (gitignored), one record per line as `{received_at, src_addr, payload}`.
+
+## Indoor climate (Zigbee → MQTT → SQLite)
+
+Indoor sensors (Sonoff SNZB-02WD and friends) talk Zigbee to a **Sonoff ZBDongle-E** (Silicon Labs CP210x; vid:pid `10c4:ea60`). The dongle is bridged to MQTT by **Zigbee2MQTT**, both of which run alongside the Mosquitto broker via `docker-compose.yml`. The Python `zigbee-subscriber` consumes those MQTT topics and lands data in the same JSONL + SQLite sinks the Tempest path uses.
+
+```sh
+# 1. Start broker + Z2M (LAN-only; no auth)
+ZIGBEE_ADAPTER_PATH=/dev/cu.usbserial-220 docker compose up -d
+# Z2M web UI: http://localhost:8080  (use it to pair sensors)
+
+# 2. Run the subscriber against the broker
+uv run zigbee-subscriber                                  # default 127.0.0.1:1883
+uv run zigbee-subscriber --broker-host 192.168.4.10       # remote broker
+uv run zigbee-subscriber --no-db                          # JSONL only
+```
+
+JSONL files rotate daily as `data/zigbee-YYYY-MM-DD.jsonl` (envelope: `{received_at, topic, friendly_name, sensor_id, payload}`); decoded numeric fields land in `observations` and the daily/monthly rollups keyed by `sensor_id = snzb:<ieee_address>`.
+
+Field mapping (Z2M payload → schema metric):
+
+| Z2M field | Metric | Notes |
+|---|---|---|
+| `temperature` | `air_temp_c` | shares an axis with the Tempest reading |
+| `humidity` | `humidity_pct` | |
+| `battery` | `battery_pct` | |
+| `voltage` | `battery_v` | converted from mV |
+| `linkquality` | `link_quality` | 0–255 |
+
+**macOS dev caveat:** OrbStack/Docker on macOS can't pass through a host `/dev/cu.*` tty to a Linux container. For local dev either (a) run Z2M natively on the Mac (`npm` install) pointing at the dockerised Mosquitto, or (b) run the whole stack on the Mac Mini deploy target where Linux USB passthrough works. The subscriber doesn't care — it just connects to a broker.
 
 ## Aggregate storage
 
@@ -86,7 +115,7 @@ The UDP collector has a full testing pyramid, with each level filterable by pyte
 
 | Marker | Tests | What it covers | Speed |
 |---|---|---|---|
-| `unit` | 29 | `JsonlWriter`, `TempestProtocol.datagram_received` (envelope, malformed-packet handling, dedupe), `decode_obs_st` (metric mapping, null slots, malformed payloads), and `Aggregator` (min/max/sum/count math, day & month boundaries, sensor isolation, idempotent dupes). No sockets. | <0.2s |
+| `unit` | 65 | Tempest path (`JsonlWriter`, `TempestProtocol.datagram_received`, `decode_obs_st`, `Aggregator`) + Zigbee path (`decode_payload`, `decode_bridge_devices`, `MessageRouter` topic routing / catalog fallback / station overrides / `last_seen` handling). No sockets. | <0.3s |
 | `integration` | 5 | Real `asyncio` UDP endpoint on a free loopback port + real `JsonlWriter` writing to `tmp_path`, plus end-to-end through the SQLite aggregator. Sends datagrams via `socket.sendto` and asserts both file and DB contents. | <0.5s |
 | `e2e` | 1 | Spawns `python -m home_weather_hub.tempest_listener` as a subprocess, sends a datagram, sends SIGINT, and asserts a clean exit, the `"shutting down"` log line, and a valid JSONL file. | ~1s |
 

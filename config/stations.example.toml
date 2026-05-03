@@ -10,8 +10,12 @@ location  = "outside"
 latitude  = 47.6062
 longitude = -122.3321
 
-# Future Zigbee/MQTT sensors will follow the same shape:
-#
+# Zigbee/MQTT sensors follow the same shape. The sensor_id is
+# `snzb:<ieee_address>` — find it under "About this device" in the
+# Zigbee2MQTT web UI, or in the `bridge/devices` MQTT message.
+# kind is free-form (e.g. "snzb-02wd", "snzb-02p"); the subscriber uses
+# only label/location for now, but kind is recorded for catalog queries.
+
 # [[stations]]
 # sensor_id = "snzb:0xa4c138aabbccdd"
 # kind      = "snzb-02wd"

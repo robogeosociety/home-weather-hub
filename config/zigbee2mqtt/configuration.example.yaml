@@ -1,0 +1,43 @@
+# Zigbee2MQTT bootstrap config for the home-weather-hub.
+#
+# Copy to `configuration.yaml` (gitignored) on the deploy host before first
+# run. Z2M will rewrite this file in-place as devices are paired and
+# settings change in the web UI — keep the example pristine here.
+
+homeassistant: false
+permit_join: false  # flip to true (or use the web UI) only while pairing
+
+mqtt:
+  base_topic: zigbee2mqtt
+  server: mqtt://hwh-mosquitto:1883  # service name from docker-compose
+  # If running Z2M outside compose, point at the broker's LAN IP instead, e.g.:
+  # server: mqtt://192.168.4.10:1883
+
+serial:
+  # Sonoff ZBDongle-E (Silicon Labs CP210x, vid:pid 10c4:ea60).
+  # The compose file binds the host adapter onto /dev/ttyUSB0 inside the
+  # container so this path stays stable across hosts.
+  port: /dev/ttyUSB0
+  adapter: ember
+  baudrate: 115200
+
+frontend:
+  port: 8080
+  host: 0.0.0.0
+
+advanced:
+  # Output JSON payloads (the default) so the Python decoder can json.loads().
+  output: json
+  log_level: info
+  # Use friendly_name in topics; we map it back to ieee_address via the
+  # retained `bridge/devices` catalog inside the subscriber.
+  legacy_api: false
+
+device_options:
+  # Defaults per device — anything published on `zigbee2mqtt/<friendly_name>`
+  # will at minimum carry battery, linkquality, and the device's native
+  # measurements (temperature, humidity, ...).
+  retain: false
+
+# devices: {}            # populated by Z2M as you pair
+# groups: {}             # populated by Z2M as you pair

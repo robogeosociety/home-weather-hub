@@ -1,0 +1,54 @@
+# LAN-only ingest stack for the home-weather-hub.
+#
+# Services:
+#   mosquitto   — MQTT broker the rest of the LAN talks to
+#   zigbee2mqtt — bridges the Sonoff ZBDongle-E to MQTT topics
+#                 (publishes per-device messages on `zigbee2mqtt/<name>`)
+#
+# The Python `zigbee-subscriber` (run separately, not in this compose) is the
+# consumer — it reads MQTT and writes JSONL + ./data/weather.db.
+#
+# Deploy target: Mac Mini M1 with OrbStack (linux/arm64). The Sonoff dongle
+# (Itead, Silicon Labs CP210x; vid:pid 10c4:ea60) must be physically attached
+# to whichever host runs Z2M. The device path is overridable via env:
+#
+#   ZIGBEE_ADAPTER_PATH=/dev/cu.usbserial-220 docker compose up -d
+#
+# macOS note: container runtimes on macOS cannot pass through a host /dev/cu.*
+# tty directly. For local-mac dev, either (a) run Z2M natively on the Mac
+# while pointing it at the dockerised Mosquitto, or (b) run the whole stack
+# on the Mac Mini deploy target where Linux passthrough Just Works.
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: hwh-mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"   # MQTT (LAN, no auth — see mosquitto.conf)
+      - "9001:9001"   # MQTT-over-WebSocket, for the future dashboard
+    volumes:
+      - ./config/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-log:/mosquitto/log
+
+  zigbee2mqtt:
+    image: koenkk/zigbee2mqtt:latest
+    container_name: hwh-zigbee2mqtt
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+    ports:
+      - "8080:8080"   # web UI (pair, rename, read live state)
+    environment:
+      TZ: ${TZ:-America/Los_Angeles}
+    volumes:
+      - ./config/zigbee2mqtt:/app/data
+      - /run/udev:/run/udev:ro
+    devices:
+      # Override on macOS / on a host where the dongle enumerates differently.
+      - "${ZIGBEE_ADAPTER_PATH:-/dev/cu.usbserial-220}:/dev/ttyUSB0"
+
+volumes:
+  mosquitto-data:
+  mosquitto-log:

@@ -6,12 +6,15 @@ authors = [
     { name = "Tommy Doerr", email = "tommy.b.doerr@gmail.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "aiomqtt>=2.4.0",
+]
 
 [project.scripts]
 tempest-listener = "home_weather_hub.tempest_listener:main"
 tempest-monitor = "home_weather_hub.tempest_monitor:main"
 tempest-stats = "home_weather_hub.tempest_stats:main"
+zigbee-subscriber = "home_weather_hub.zigbee_subscriber:main"
 
 [build-system]
 requires = ["uv_build>=0.10.4,<0.11.0"]

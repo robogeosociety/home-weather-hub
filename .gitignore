@@ -155,3 +155,7 @@ data/
 
 # Per-host station config (lat/lng is host-specific, not source-controlled)
 config/stations.toml
+
+# Zigbee2MQTT runtime state (rewritten in-place by Z2M as devices pair)
+config/zigbee2mqtt/*
+!config/zigbee2mqtt/configuration.example.yaml
