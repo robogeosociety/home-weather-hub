@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
-# Idempotent installer for the Zigbee ingest stack on macOS (Apple Silicon).
+# Idempotent installer for the home-weather-hub ingest stack on macOS.
 #
-# Brings up:
-#   - Mosquitto via brew services      (broker on 1883 + 9001)
-#   - Zigbee2MQTT via launchd agent    (~/zigbee2mqtt, native Node @24)
-#   - zigbee-subscriber via launchd    (this repo, uv run zigbee-subscriber)
+# Brings up everything as a launchd / brew-services managed service:
+#   - Mosquitto via brew services        (broker on 1883 + 9001)
+#   - Zigbee2MQTT via launchd agent      (~/zigbee2mqtt, native Node @24)
+#   - zigbee-subscriber via launchd      (this repo, uv run zigbee-subscriber)
+#   - tempest-listener via launchd       (this repo, uv run tempest-listener)
 #
 # Re-running is safe: each step checks for the desired end state before acting.
 #
 # Usage:
-#   scripts/install-zigbee-native.sh                   # default Sonoff dongle path
-#   ZIGBEE_ADAPTER_PATH=/dev/cu.usbserial-XXX scripts/install-zigbee-native.sh
+#   scripts/install-native.sh                          # default Sonoff dongle path
+#   ZIGBEE_ADAPTER_PATH=/dev/cu.usbserial-XXX scripts/install-native.sh
 #
 # Prerequisites:
 #   - Homebrew installed
@@ -167,6 +168,10 @@ install_agent \
   "$REPO_DIR/scripts/launchd/com.home-weather-hub.zigbee-subscriber.plist" \
   "$LAUNCH_AGENTS_DIR/com.home-weather-hub.zigbee-subscriber.plist"
 
+install_agent \
+  "$REPO_DIR/scripts/launchd/com.home-weather-hub.tempest-listener.plist" \
+  "$LAUNCH_AGENTS_DIR/com.home-weather-hub.tempest-listener.plist"
+
 # 8. Smoke check -------------------------------------------------------------
 sleep 4
 note "verifying agents are running"
@@ -176,14 +181,18 @@ launchctl print "gui/$UID/com.zigbee2mqtt" >/dev/null \
 launchctl print "gui/$UID/com.home-weather-hub.zigbee-subscriber" >/dev/null \
   && ok "com.home-weather-hub.zigbee-subscriber loaded" \
   || warn "subscriber not loaded — check $REPO_DIR/data/zigbee-subscriber.launchd.log"
+launchctl print "gui/$UID/com.home-weather-hub.tempest-listener" >/dev/null \
+  && ok "com.home-weather-hub.tempest-listener loaded" \
+  || warn "tempest-listener not loaded — check $REPO_DIR/data/tempest-listener.launchd.log"
 
 cat <<EOF
 
 Done. Next steps:
-  - Z2M web UI:     http://localhost:$Z2M_FRONTEND_PORT
-  - Pair sensors:   toggle "Permit join" in the Z2M UI, then reset the device
-  - Inspect data:   sqlite3 $REPO_DIR/data/weather.db
-  - Stop a service: launchctl bootout gui/$UID ~/Library/LaunchAgents/<plist>
-  - Tail Z2M:       tail -f $Z2M_DIR/data/launchd.log
-  - Tail subscriber:tail -f $REPO_DIR/data/zigbee-subscriber.launchd.log
+  - Z2M web UI:        http://localhost:$Z2M_FRONTEND_PORT
+  - Pair sensors:      toggle "Permit join" in the Z2M UI, then reset the device
+  - Inspect data:      sqlite3 $REPO_DIR/data/weather.db
+  - Stop a service:    launchctl bootout gui/$UID ~/Library/LaunchAgents/<plist>
+  - Tail Z2M:          tail -f $Z2M_DIR/data/launchd.log
+  - Tail subscriber:   tail -f $REPO_DIR/data/zigbee-subscriber.launchd.log
+  - Tail Tempest:      tail -f $REPO_DIR/data/tempest-listener.launchd.log
 EOF

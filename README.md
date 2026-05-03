@@ -28,10 +28,26 @@ Monitor outside and inside climate and host a live dashboard on the local networ
 ## Quick start
 
 ```sh
-uv sync                              # install runtime + dev deps
+uv sync                                                 # install runtime + dev deps
+ZIGBEE_ADAPTER_PATH=/dev/cu.usbserial-220 \
+    scripts/install-native.sh                           # one-shot setup of all services
+```
+
+The installer is idempotent and brings up every collector as a managed service:
+
+| Service | Managed by |
+|---|---|
+| `mosquitto` (MQTT broker on 1883/9001) | `brew services` |
+| `com.zigbee2mqtt` (native Node, frontend on 127.0.0.1:8088) | launchd agent |
+| `com.home-weather-hub.zigbee-subscriber` (indoor ingest) | launchd agent |
+| `com.home-weather-hub.tempest-listener` (outdoor UDP ingest) | launchd agent |
+
+For ad-hoc work the listeners can also run by hand:
+
+```sh
 uv run tempest-listener              # bind 0.0.0.0:50222, write JSONL + SQLite to ./data/
-uv run tempest-listener --port 50222 --data-dir ./data --db-path ./data/weather.db
-uv run tempest-listener --no-db      # JSONL only (skip the aggregate DB)
+uv run tempest-listener --no-db      # JSONL only
+uv run zigbee-subscriber             # ingests from the local broker
 ```
 
 Stop with `Ctrl-C`; SIGINT/SIGTERM trigger a clean drain + close. Each `obs_st` packet is JSONL-appended **and** decoded into the SQLite aggregate store; raw packets land in `./data/*.jsonl` (gitignored), one record per line as `{received_at, src_addr, payload}`.

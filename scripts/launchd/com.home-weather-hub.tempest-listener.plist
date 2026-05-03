@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  home-weather-hub Tempest UDP listener launch agent.
+
+  Binds 0.0.0.0:50222 with SO_REUSEADDR/SO_REUSEPORT/SO_BROADCAST and
+  appends every packet to data/tempest-YYYY-MM-DD.jsonl plus the SQLite
+  aggregate store.
+
+  Installed at ~/Library/LaunchAgents/com.home-weather-hub.tempest-listener.plist
+  by scripts/install-native.sh, which sed-templates @@HOME@@, @@REPO_DIR@@,
+  and @@UV_BIN@@ at install time.
+
+  Manage:
+    launchctl print gui/$UID/com.home-weather-hub.tempest-listener
+    launchctl bootout gui/$UID ~/Library/LaunchAgents/com.home-weather-hub.tempest-listener.plist
+    launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.home-weather-hub.tempest-listener.plist
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.home-weather-hub.tempest-listener</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>@@UV_BIN@@</string>
+    <string>run</string>
+    <string>tempest-listener</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>@@REPO_DIR@@</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>@@HOME@@/.local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    <key>HOME</key>
+    <string>@@HOME@@</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- Listener has no fatal failure modes — bad packets log a WARNING and
+       are dropped; SIGINT/SIGTERM trigger a clean drain. KeepAlive=true
+       restarts the agent on crash, on boot, and after a network reset. -->
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <key>StandardOutPath</key>
+  <string>@@REPO_DIR@@/data/tempest-listener.launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>@@REPO_DIR@@/data/tempest-listener.launchd.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>
