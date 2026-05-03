@@ -13,6 +13,9 @@ from collections.abc import Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+from home_weather_hub.event_bus import EventBus
+from home_weather_hub.tempest_decode import decode
+
 DEFAULT_PORT = 50222
 DEFAULT_FLUSH_INTERVAL_SEC = 5.0
 DEFAULT_DEDUPE_WINDOW_SEC = 2.0
@@ -63,12 +66,14 @@ class TempestProtocol(asyncio.DatagramProtocol):
         writer: JsonlWriter,
         dedupe_window_sec: float = DEFAULT_DEDUPE_WINDOW_SEC,
         time_source: Callable[[], float] = time.monotonic,
+        event_bus: EventBus | None = None,
     ):
         self._writer = writer
         self._packet_count = 0
         self._dropped_dups = 0
         self._dedupe_window = dedupe_window_sec
         self._time = time_source
+        self._event_bus = event_bus
         # Maps raw datagram bytes -> expiry time (monotonic seconds).
         self._recent: dict[bytes, float] = {}
 
@@ -111,6 +116,10 @@ class TempestProtocol(asyncio.DatagramProtocol):
         }
         self._writer.write(record)
         self._packet_count += 1
+        if self._event_bus is not None and isinstance(payload, dict):
+            decoded = decode(payload)
+            if decoded is not None:
+                self._event_bus.publish(decoded)
         if self._packet_count % 100 == 1:
             log.info(
                 "packet #%d type=%s from %s",

@@ -18,6 +18,8 @@ import termios
 import tty
 from datetime import datetime
 
+from home_weather_hub.tempest_decode import format_oneline
+
 DEFAULT_PORT = 50222
 
 _COLORS = {
@@ -30,89 +32,6 @@ _COLORS = {
     "light_debug": "\x1b[2m",  # dim
 }
 _RESET = "\x1b[0m"
-
-
-def _c_to_f(c: float) -> float:
-    return c * 9 / 5 + 32
-
-
-def _mps_to_mph(mps: float) -> float:
-    return mps * 2.23694
-
-
-def _mm_to_in(mm: float) -> float:
-    return mm / 25.4
-
-
-def _format_uptime(seconds: int) -> str:
-    days, rem = divmod(int(seconds), 86400)
-    hours, rem = divmod(rem, 3600)
-    minutes, _ = divmod(rem, 60)
-    if days:
-        return f"{days}d{hours}h"
-    if hours:
-        return f"{hours}h{minutes}m"
-    return f"{minutes}m"
-
-
-def _format_payload(payload: dict) -> str:
-    """Render a Tempest packet as a one-line summary keyed by .type."""
-    t = payload.get("type", "?")
-
-    if t == "obs_st":
-        obs_lists = payload.get("obs") or [[]]
-        obs = obs_lists[0] if obs_lists else []
-        if len(obs) >= 18 and all(o is not None for o in obs[:13]):
-            return (
-                "obs_st  "
-                f"temp={_c_to_f(obs[7]):.1f}°F ({obs[7]:.1f}°C)  "
-                f"rh={obs[8]:.0f}%  "
-                f"wind={_mps_to_mph(obs[2]):.1f} mph @{obs[4]:.0f}°  "
-                f"gust={_mps_to_mph(obs[3]):.1f} mph  "
-                f"press={obs[6]:.1f} mb  "
-                f"rain={_mm_to_in(obs[12]):.3f} in/min  "
-                f"lux={obs[9]:.0f}  "
-                f"uv={obs[10]:.1f}  "
-                f"bat={obs[16]:.2f}V"
-            )
-        return f"obs_st (unexpected obs shape, len={len(obs)}): {obs!r}"
-
-    if t == "rapid_wind":
-        ob = payload.get("ob") or []
-        if len(ob) >= 3 and ob[1] is not None and ob[2] is not None:
-            return f"rapid_wind  {_mps_to_mph(ob[1]):.1f} mph @{ob[2]:.0f}°"
-        return f"rapid_wind (unexpected ob shape): {ob!r}"
-
-    if t == "hub_status":
-        return (
-            "hub_status     "
-            f"uptime={_format_uptime(payload.get('uptime', 0))}  "
-            f"rssi={payload.get('rssi', '?')} dBm  "
-            f"seq={payload.get('seq', '?')}"
-        )
-
-    if t == "device_status":
-        v = payload.get("voltage")
-        v_str = f"{v:.2f}V" if isinstance(v, int | float) else f"{v}"
-        return (
-            "device_status  "
-            f"uptime={_format_uptime(payload.get('uptime', 0))}  "
-            f"bat={v_str}  "
-            f"rssi={payload.get('rssi', '?')} dBm  "
-            f"hub_rssi={payload.get('hub_rssi', '?')} dBm  "
-            f"sensor_status={payload.get('sensor_status', '?')}"
-        )
-
-    if t == "evt_strike":
-        evt = payload.get("evt") or []
-        if len(evt) >= 3:
-            return f"evt_strike  distance={evt[1]} km  energy={evt[2]}"
-        return f"evt_strike: {evt!r}"
-
-    if t == "evt_precip":
-        return "evt_precip  rain detected"
-
-    return f"{t}  {json.dumps(payload, separators=(',', ':'))[:200]}"
 
 
 class _Monitor(asyncio.DatagramProtocol):
@@ -138,7 +57,7 @@ class _Monitor(asyncio.DatagramProtocol):
         t = payload.get("type", "?") if isinstance(payload, dict) else "?"
         if self._types is not None and t not in self._types:
             return
-        line = _format_payload(payload if isinstance(payload, dict) else {"raw": payload})
+        line = format_oneline(payload if isinstance(payload, dict) else {"raw": payload})
         prefix = f"[{ts}] {addr[0]:>15}  "
         if self._color and t in _COLORS:
             print(f"{prefix}{_COLORS[t]}{line}{_RESET}", flush=True)
