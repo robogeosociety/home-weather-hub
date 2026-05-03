@@ -134,6 +134,7 @@ export function MetricWidget({ config }: MetricWidgetProps) {
 
   return (
     <TVChrome
+      widgetId={config.i}
       title={spec.title}
       stat={stat}
       state={widgetState}

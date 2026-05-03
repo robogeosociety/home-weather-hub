@@ -36,6 +36,7 @@ export function WindWidget({ config }: WindWidgetProps) {
 
   return (
     <TVChrome
+      widgetId={config.i}
       title="WIND"
       state={widgetState}
       display={config.display}

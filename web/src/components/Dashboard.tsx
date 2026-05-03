@@ -8,6 +8,7 @@ import { useSettings } from '../state/settings';
 import { MetricWidget } from './widgets/MetricWidget';
 import { WindWidget } from './widgets/WindWidget';
 import { StrikesWidget } from './widgets/StrikesWidget';
+import { WidgetPalette } from './WidgetPalette';
 
 const ResponsiveGrid = WidthProvider(Responsive);
 
@@ -75,6 +76,7 @@ export function Dashboard() {
   return (
     <div className={`twc-dashboard ${fixed ? 'is-fixed' : ''}`} ref={dashboardRef}>
       <div className="twc-grid-bg" />
+      {editMode && <WidgetPalette />}
       <ResponsiveGrid
         layouts={rgLayouts}
         breakpoints={BREAKPOINTS}

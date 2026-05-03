@@ -11,7 +11,7 @@ interface StrikesWidgetProps {
   config: WidgetConfig;
 }
 
-export function StrikesWidget({ config: _config }: StrikesWidgetProps) {
+export function StrikesWidget({ config }: StrikesWidgetProps) {
   const live = useLive();
   const editMode = useSettings((s) => s.editMode);
 
@@ -57,7 +57,7 @@ export function StrikesWidget({ config: _config }: StrikesWidgetProps) {
       : 'live';
 
   return (
-    <TVChrome title="LIGHTNING" state={state}>
+    <TVChrome widgetId={config.i} title="LIGHTNING" state={state}>
       {strikes.length === 0 ? (
         <div className="twc-map">
           <div className="twc-map-empty">

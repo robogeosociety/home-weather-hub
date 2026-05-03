@@ -298,6 +298,75 @@ body {
   overflow: hidden;
 }
 
+/* ----- Widget palette (edit-mode pill row) ----- */
+
+.twc-palette {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 14px 12px 14px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid rgba(0, 212, 255, 0.18);
+}
+
+.twc-palette-label {
+  font-family: var(--twc-font-italic);
+  font-style: italic;
+  color: var(--twc-bone);
+  opacity: 0.85;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+}
+
+.twc-palette-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.twc-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--twc-cyan-dim);
+  background: rgba(0, 8, 20, 0.4);
+  color: var(--twc-bone-dim);
+  font-family: var(--twc-font-display);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 140ms ease, border-color 140ms ease, background 140ms ease;
+}
+
+.twc-pill:hover {
+  border-color: var(--twc-yellow);
+  color: var(--twc-yellow);
+}
+
+.twc-pill[data-active='true'] {
+  background: rgba(255, 214, 0, 0.16);
+  border-color: var(--twc-yellow);
+  color: var(--twc-yellow);
+  text-shadow: var(--twc-bloom);
+}
+
+.twc-pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--twc-cyan-dim);
+  transition: background 140ms ease, box-shadow 140ms ease;
+}
+
+.twc-pill[data-active='true'] .twc-pill-dot {
+  background: var(--twc-yellow);
+  box-shadow: var(--twc-bloom);
+}
+
 /* react-grid-layout overrides */
 .react-grid-layout {
   position: relative;
@@ -386,6 +455,40 @@ body {
   border-radius: 50%;
   background: var(--twc-cyan);
   box-shadow: var(--twc-bloom-cool);
+}
+
+.twc-chrome-remove {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 3;
+  background: rgba(0, 8, 20, 0.7);
+  border: 1px solid var(--twc-cyan-dim);
+  color: var(--twc-bone-dim);
+  font-family: var(--twc-font-display);
+  font-size: 16px;
+  line-height: 1;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 140ms ease, border-color 140ms ease, background 140ms ease;
+}
+
+/* In edit mode, the X button owns the top-right; shift the display toggle
+   left so they don't collide. */
+.twc-app[data-edit='true'] .twc-chrome-display-toggle {
+  right: 36px;
+}
+
+.twc-chrome-remove:hover {
+  color: var(--twc-magenta);
+  border-color: var(--twc-magenta);
+  background: rgba(255, 33, 136, 0.1);
+  text-shadow: 0 0 8px var(--twc-magenta);
 }
 
 .twc-chrome-state[data-state='live'] {
