@@ -70,6 +70,7 @@ class TempestProtocol(asyncio.DatagramProtocol):
         aggregator: Aggregator | None = None,
         dedupe_window_sec: float = DEFAULT_DEDUPE_WINDOW_SEC,
         time_source: Callable[[], float] = time.monotonic,
+        known_sensors: set[str] | None = None,
     ):
         self._writer = writer
         self._aggregator = aggregator
@@ -79,6 +80,8 @@ class TempestProtocol(asyncio.DatagramProtocol):
         self._time = time_source
         # Maps raw datagram bytes -> expiry time (monotonic seconds).
         self._recent: dict[bytes, float] = {}
+        self._known_sensors: set[str] = set(known_sensors or ())
+        self._seen_sensors: set[str] = set()
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
         sock = transport.get_extra_info("socket")
@@ -136,21 +139,47 @@ class TempestProtocol(asyncio.DatagramProtocol):
         assert self._aggregator is not None
         obs = decode_obs_st(payload)
         if obs is not None:
-            sensor_id, ts, metrics = obs
-            if metrics:
-                self._aggregator.record_many(
-                    (sensor_id, "tempest", None, name, value, ts) for name, value in metrics
+            sensor_id, observations = obs
+            self._note_sensor_seen(sensor_id, src)
+            if len(observations) > 1:
+                log.info(
+                    "obs_st from %s carried %d observations (catch-up after gap)",
+                    sensor_id,
+                    len(observations),
                 )
+            rows = [
+                (sensor_id, "tempest", None, name, value, ts)
+                for ts, metrics in observations
+                for name, value in metrics
+            ]
+            if rows:
+                self._aggregator.record_many(rows)
             return
         strike = decode_evt_strike(payload)
         if strike is not None:
             sensor_id, ts, distance_km, energy = strike
+            self._note_sensor_seen(sensor_id, src)
             self._aggregator.record_strike(sensor_id, "tempest", None, ts, distance_km, energy)
             log.info(
                 "lightning strike from %s: %.1f km, energy=%d",
                 src,
                 distance_km,
                 energy,
+            )
+
+    def _note_sensor_seen(self, sensor_id: str, src: str) -> None:
+        # Once-per-process WARNING when a sensor that wasn't seeded via
+        # stations.toml shows up. Otherwise its location/lat/lng stay NULL
+        # forever and the dashboard can't place its readings on a map.
+        if sensor_id in self._seen_sensors:
+            return
+        self._seen_sensors.add(sensor_id)
+        if sensor_id not in self._known_sensors:
+            log.warning(
+                "packet from unconfigured sensor %s (src=%s); add it to stations.toml "
+                "to attach a label/location/lat-lng",
+                sensor_id,
+                src,
             )
 
 
@@ -170,6 +199,7 @@ async def _run(
 ) -> None:
     writer = JsonlWriter(data_dir)
     aggregator: Aggregator | None = None
+    known_sensors: set[str] = set()
     if db_path is not None:
         conn = open_db(db_path)
         aggregator = Aggregator(conn)
@@ -185,6 +215,7 @@ async def _run(
                     latitude=s.latitude,
                     longitude=s.longitude,
                 )
+                known_sensors.add(s.sensor_id)
             if stations:
                 log.info(
                     "seeded %d station(s) from %s: %s",
@@ -198,7 +229,12 @@ async def _run(
                 log.info("no station config at %s (skipping)", stations_path)
     loop = asyncio.get_running_loop()
     transport, _ = await loop.create_datagram_endpoint(
-        lambda: TempestProtocol(writer, aggregator=aggregator, dedupe_window_sec=dedupe_window),
+        lambda: TempestProtocol(
+            writer,
+            aggregator=aggregator,
+            dedupe_window_sec=dedupe_window,
+            known_sensors=known_sensors,
+        ),
         local_addr=("0.0.0.0", port),
         family=socket.AF_INET,
         allow_broadcast=True,

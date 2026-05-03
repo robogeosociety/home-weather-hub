@@ -54,10 +54,14 @@ def _query_monthly(
     return list(conn.execute(sql, args))
 
 
+DEFAULT_STRIKES_LIMIT = 500
+
+
 def _query_strikes(
     conn: sqlite3.Connection,
     last_days: int | None,
     sensor: str | None,
+    limit: int = DEFAULT_STRIKES_LIMIT,
 ) -> list[sqlite3.Row]:
     sql = (
         "SELECT datetime(ts, 'unixepoch') AS at, sensor_id, distance_km, energy "
@@ -71,7 +75,8 @@ def _query_strikes(
     if sensor:
         sql += " AND sensor_id = ?"
         args.append(sensor)
-    sql += " ORDER BY ts DESC LIMIT 500"
+    sql += " ORDER BY ts DESC LIMIT ?"
+    args.append(limit)
     return list(conn.execute(sql, args))
 
 
@@ -117,6 +122,12 @@ def main() -> None:
         action="store_true",
         help="Show individual lightning strikes instead of metric aggregates.",
     )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=DEFAULT_STRIKES_LIMIT,
+        help=f"Cap rows returned by --strikes (default {DEFAULT_STRIKES_LIMIT}).",
+    )
     args = parser.parse_args()
 
     if not args.db_path.exists():
@@ -125,11 +136,13 @@ def main() -> None:
     conn = open_db(args.db_path)
     try:
         if args.strikes:
-            rows = _query_strikes(conn, args.last_days, args.sensor)
+            rows = _query_strikes(conn, args.last_days, args.sensor, args.limit)
             print(
                 "# lightning strikes" + (f" (last {args.last_days} days)" if args.last_days else "")
             )
             _print_table(rows, ["at", "sensor_id", "distance_km", "energy"])
+            if len(rows) == args.limit:
+                print(f"# (output capped at --limit={args.limit}; raise it to see more)")
         elif args.last_days is not None:
             rows = _query_daily(conn, args.last_days, args.metric, args.sensor)
             _print_table(

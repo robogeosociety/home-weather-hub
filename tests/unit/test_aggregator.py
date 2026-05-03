@@ -98,6 +98,22 @@ def test_distinct_sensors_do_not_collide_on_same_metric(agg: Aggregator) -> None
     assert sensor_kinds == {"tempest:ST-1": "tempest", "snzb:0xa1": "snzb-02wd"}
 
 
+def test_record_many_uses_max_ts_for_sensor_last_seen(agg: Aggregator) -> None:
+    """A single record_many batch may carry catch-up observations spanning
+    multiple timestamps. The sensor's last_seen must reflect the newest one,
+    not whichever row happened to be processed first."""
+    base = _epoch(2026, 5, 2, 10)
+    rows = [
+        ("tempest:ST-1", "tempest", None, "air_temp_c", 18.0, base),
+        ("tempest:ST-1", "tempest", None, "air_temp_c", 19.0, base + 60),
+        ("tempest:ST-1", "tempest", None, "air_temp_c", 20.0, base + 120),
+    ]
+    agg.record_many(rows)
+    row = agg._conn.execute("SELECT first_seen, last_seen FROM sensors").fetchone()
+    assert row["first_seen"] == base
+    assert row["last_seen"] == base + 120
+
+
 def test_record_many_runs_in_single_transaction(agg: Aggregator) -> None:
     ts = _epoch(2026, 5, 2)
     rows = [

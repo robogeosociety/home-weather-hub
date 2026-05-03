@@ -23,12 +23,16 @@ OBS_ST_METRICS: tuple[tuple[int, str], ...] = (
 )
 
 
-def decode_obs_st(payload: dict) -> tuple[str, int, list[tuple[str, float]]] | None:
+def decode_obs_st(payload: dict) -> tuple[str, list[tuple[int, list[tuple[str, float]]]]] | None:
     """Decode an `obs_st` Tempest packet.
 
-    Returns `(sensor_id, ts, [(metric, value), ...])` or `None` if the payload
-    is not an obs_st packet, the obs array is missing/empty, or the timestamp
-    is unusable. Null sub-sensor slots are skipped silently.
+    Returns `(sensor_id, [(ts, [(metric, value), ...]), ...])` or `None` if
+    the payload is not an obs_st packet or has no usable serial/obs array.
+    The Tempest hub batches multiple observations into one obs_st when it
+    reconnects after a connectivity gap; each entry in `obs[]` becomes a
+    separate `(ts, metrics)` tuple. Entries with a missing/non-numeric
+    timestamp are skipped. Null sub-sensor slots inside an entry are also
+    skipped silently.
     """
     if payload.get("type") != "obs_st":
         return None
@@ -38,22 +42,26 @@ def decode_obs_st(payload: dict) -> tuple[str, int, list[tuple[str, float]]] | N
     obs_lists = payload.get("obs")
     if not isinstance(obs_lists, list) or not obs_lists:
         return None
-    obs = obs_lists[0]
-    if not isinstance(obs, list) or not obs:
-        return None
-    ts = obs[0]
-    if not isinstance(ts, int | float):
-        return None
-    ts_int = int(ts)
-    metrics: list[tuple[str, float]] = []
-    for idx, name in OBS_ST_METRICS:
-        if idx >= len(obs):
+    observations: list[tuple[int, list[tuple[str, float]]]] = []
+    for obs in obs_lists:
+        if not isinstance(obs, list) or not obs:
             continue
-        val = obs[idx]
-        if val is None or not isinstance(val, int | float):
+        ts = obs[0]
+        if not isinstance(ts, int | float):
             continue
-        metrics.append((name, float(val)))
-    return f"tempest:{serial}", ts_int, metrics
+        ts_int = int(ts)
+        metrics: list[tuple[str, float]] = []
+        for idx, name in OBS_ST_METRICS:
+            if idx >= len(obs):
+                continue
+            val = obs[idx]
+            if val is None or not isinstance(val, int | float):
+                continue
+            metrics.append((name, float(val)))
+        observations.append((ts_int, metrics))
+    if not observations:
+        return None
+    return f"tempest:{serial}", observations
 
 
 def decode_evt_strike(payload: dict) -> tuple[str, int, float, int] | None:

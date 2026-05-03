@@ -6,6 +6,10 @@ import sqlite3
 from collections.abc import Iterable
 from datetime import UTC, datetime
 
+# NOTE on min_ts/max_ts tie-break: the CASE expressions use strict `<` / `>`,
+# so when a new observation ties the existing extreme the *first* occurrence's
+# timestamp is preserved. That gives the dashboard a stable "first time today
+# we saw the high/low" answer instead of jittering to the most recent tie.
 _UPSERT_DAILY = """
 INSERT INTO daily_aggregates
     (day, sensor_id, metric, min_value, max_value, sum_value, count, min_ts, max_ts)
@@ -77,7 +81,12 @@ class Aggregator:
         conn = self._conn
         conn.execute("BEGIN")
         try:
-            seen_sensors: set[str] = set()
+            # Per-sensor min/max ts in the batch. The one sensor upsert per
+            # (sensor, batch) seeds first_seen with the earliest accepted ts
+            # and bumps last_seen to the latest — so a catch-up batch after a
+            # reconnect doesn't accidentally rewrite first_seen forward or
+            # leave last_seen behind.
+            sensor_span: dict[str, tuple[str, str | None, int, int]] = {}
             for sensor_id, kind, location, metric, value, ts in rows:
                 cur = conn.execute(
                     "INSERT OR IGNORE INTO observations (ts, sensor_id, metric, value) "
@@ -98,9 +107,18 @@ class Aggregator:
                     _UPSERT_MONTHLY,
                     (month, sensor_id, metric, value, value, value, ts, ts),
                 )
-                if sensor_id not in seen_sensors:
-                    conn.execute(_UPSERT_SENSOR, (sensor_id, kind, location, ts, ts))
-                    seen_sensors.add(sensor_id)
+                prev = sensor_span.get(sensor_id)
+                if prev is None:
+                    sensor_span[sensor_id] = (kind, location, ts, ts)
+                else:
+                    sensor_span[sensor_id] = (
+                        kind,
+                        location,
+                        min(prev[2], ts),
+                        max(prev[3], ts),
+                    )
+            for sensor_id, (kind, location, first_ts, last_ts) in sensor_span.items():
+                conn.execute(_UPSERT_SENSOR, (sensor_id, kind, location, first_ts, last_ts))
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")

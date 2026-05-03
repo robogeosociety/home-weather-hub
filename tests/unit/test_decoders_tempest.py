@@ -45,8 +45,10 @@ def test_decode_obs_st_full_payload() -> None:
     }
     result = decode_obs_st(payload)
     assert result is not None
-    sensor_id, ts, metrics = result
+    sensor_id, observations = result
     assert sensor_id == "tempest:ST-00027770"
+    assert len(observations) == 1
+    ts, metrics = observations[0]
     assert ts == 1_700_000_000
     by_name = dict(metrics)
     assert by_name["wind_lull_mps"] == 0.5
@@ -73,10 +75,43 @@ def test_decode_obs_st_skips_null_subsensor_slots() -> None:
     payload = {"type": "obs_st", "serial_number": "ST-1", "obs": [obs]}
     result = decode_obs_st(payload)
     assert result is not None
-    names = {m for m, _ in result[2]}
+    _, observations = result
+    names = {m for m, _ in observations[0][1]}
     assert "uv_index" not in names
     assert "rain_mm" not in names
     assert "air_temp_c" in names
+
+
+def test_decode_obs_st_returns_all_batched_observations() -> None:
+    """Tempest packs catch-up observations into one obs_st packet after a
+    connectivity gap. Each entry must yield its own (ts, metrics) tuple so
+    the listener can aggregate every reading instead of just the first."""
+    payload = {
+        "type": "obs_st",
+        "serial_number": "ST-1",
+        "obs": [_full_obs(1_700_000_000), _full_obs(1_700_000_060), _full_obs(1_700_000_120)],
+    }
+    result = decode_obs_st(payload)
+    assert result is not None
+    sensor_id, observations = result
+    assert sensor_id == "tempest:ST-1"
+    assert [ts for ts, _ in observations] == [1_700_000_000, 1_700_000_060, 1_700_000_120]
+    # Every entry independently carries the full metric set.
+    assert all(len(metrics) == len(OBS_ST_METRICS) for _, metrics in observations)
+
+
+def test_decode_obs_st_skips_malformed_entries_in_batch() -> None:
+    # First entry is fine; second has a non-numeric ts and must be dropped.
+    payload = {
+        "type": "obs_st",
+        "serial_number": "ST-1",
+        "obs": [_full_obs(1_700_000_000), [None, 1.0, 2.0]],
+    }
+    result = decode_obs_st(payload)
+    assert result is not None
+    _, observations = result
+    assert len(observations) == 1
+    assert observations[0][0] == 1_700_000_000
 
 
 def test_decode_non_obs_st_returns_none() -> None:
@@ -98,7 +133,8 @@ def test_decode_truncated_obs_array_only_yields_present_metrics() -> None:
     payload = {"type": "obs_st", "serial_number": "ST-2", "obs": [short]}
     result = decode_obs_st(payload)
     assert result is not None
-    names = [m for m, _ in result[2]]
+    _, observations = result
+    names = [m for m, _ in observations[0][1]]
     assert names == ["wind_lull_mps", "wind_avg_mps", "wind_gust_mps", "wind_dir_deg"]
 
 
