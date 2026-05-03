@@ -35,14 +35,14 @@ Inspect via `uv run tempest-stats [--month YYYY-MM | --last-days N] [--metric ..
 
 ## Zigbee + MQTT subscriber
 
-`src/home_weather_hub/zigbee_subscriber.py` — `aiomqtt`-based subscriber that consumes Zigbee2MQTT topics from the LAN broker. Topology:
+`src/home_weather_hub/zigbee_subscriber.py` — `aiomqtt`-based subscriber that consumes Zigbee2MQTT topics from the LAN broker. Topology (everything native — Docker on macOS can't pass through host `/dev/cu.*` ttys):
 
 ```
-Sonoff SNZB-02WD (Zigbee)  →  ZBDongle-E (USB)  →  Zigbee2MQTT (container)
+Sonoff SNZB-02WD (Zigbee)  →  ZBDongle-E (USB)  →  Zigbee2MQTT (native, ~/zigbee2mqtt)
                                                      ↓ MQTT
-                                                  Mosquitto (container)
+                                                  Mosquitto (brew services)
                                                      ↓
-                                                  zigbee-subscriber  →  data/zigbee-*.jsonl + weather.db
+                                                  zigbee-subscriber (launchd)  →  data/zigbee-*.jsonl + weather.db
 ```
 
 - Subscribes to `zigbee2mqtt/bridge/devices` (retained device catalogue) and `zigbee2mqtt/+` (per-device readings).
@@ -51,13 +51,31 @@ Sonoff SNZB-02WD (Zigbee)  →  ZBDongle-E (USB)  →  Zigbee2MQTT (container)
 - JSONL daily-rotates as `data/zigbee-YYYY-MM-DD.jsonl`; envelope is `{received_at, topic, friendly_name, sensor_id, payload}`.
 - Decoded numeric fields land in `observations` + the daily/monthly rollups via the same `Aggregator` the Tempest path uses. Field map: `temperature → air_temp_c`, `humidity → humidity_pct`, `battery → battery_pct`, `voltage → battery_v` (mV → V), `linkquality → link_quality`, `pressure → pressure_mb`.
 - Per-message timestamp prefers Z2M's `last_seen` over wall-clock so day/month buckets follow the device's clock.
+- aiomqtt raises on broker disconnect rather than auto-reconnecting; the subscriber's launchd `KeepAlive=true` respawns it. The Z2M catalog reseeds from the retained `bridge/devices` topic on reconnect, so nothing is lost.
 
-The broker + Z2M run via `docker-compose.yml` (Mosquitto on `1883`/`9001`, Z2M web UI on `8080`). Z2M's serial port is bound from `${ZIGBEE_ADAPTER_PATH:-/dev/cu.usbserial-220}` to `/dev/ttyUSB0` inside the container, with adapter `ember` (the ZBDongle-E runs EmberZNet, not zstack). macOS dev caveat: container runtimes there can't pass through `/dev/cu.*`; either run Z2M natively on the Mac or run the whole stack on the Mac Mini deploy host.
+### Operating the stack
 
-Run it:
+Three services managed in three different ways, all on this Mac:
 
 ```sh
-ZIGBEE_ADAPTER_PATH=/dev/cu.usbserial-220 docker compose up -d
+brew services list                                        # mosquitto (broker)
+launchctl print gui/$UID/com.zigbee2mqtt                  # native Z2M, frontend on 127.0.0.1:8088
+launchctl print gui/$UID/com.home-weather-hub.zigbee-subscriber
+```
+
+The plists live in `scripts/launchd/` and are templated + bootstrapped by `scripts/install-zigbee-native.sh` (idempotent — re-run any time). Z2M's frontend binds **127.0.0.1**, not 0.0.0.0; the dual-stack IPv4+IPv6 listen that `0.0.0.0` triggers crashes Z2M with EADDRINUSE under launchd. External UI access is via Tailscale serve, not direct bind:
+
+```sh
+tailscale serve --bg --https=8088 http://127.0.0.1:8088   # tailnet HTTPS for the Z2M UI
+```
+
+Logs:
+- Z2M: `~/zigbee2mqtt/data/launchd.log` (stdout/stderr) and `~/zigbee2mqtt/data/log/log.log` (Z2M's own log)
+- Subscriber: `data/zigbee-subscriber.launchd.log`
+
+Run subscriber by hand (the launchd agent owns it normally):
+
+```sh
 uv run zigbee-subscriber                       # default 127.0.0.1:1883
 uv run zigbee-subscriber --no-db               # JSONL only
 uv run zigbee-subscriber --broker-host 192.168.4.10 --base-topic zigbee2mqtt

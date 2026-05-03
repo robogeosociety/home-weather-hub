@@ -38,20 +38,47 @@ Stop with `Ctrl-C`; SIGINT/SIGTERM trigger a clean drain + close. Each `obs_st` 
 
 ## Indoor climate (Zigbee → MQTT → SQLite)
 
-Indoor sensors (Sonoff SNZB-02WD and friends) talk Zigbee to a **Sonoff ZBDongle-E** (Silicon Labs CP210x; vid:pid `10c4:ea60`). The dongle is bridged to MQTT by **Zigbee2MQTT**, both of which run alongside the Mosquitto broker via `docker-compose.yml`. The Python `zigbee-subscriber` consumes those MQTT topics and lands data in the same JSONL + SQLite sinks the Tempest path uses.
+Indoor sensors (Sonoff SNZB-02WD and friends) talk Zigbee to a **Sonoff ZBDongle-E** (Silicon Labs CP210x; vid:pid `10c4:ea60`). The dongle is bridged to MQTT by **Zigbee2MQTT** (native Node, not containerised — Docker on macOS can't pass through host `/dev/cu.*` ttys). The Python `zigbee-subscriber` consumes those MQTT topics and lands data in the same JSONL + SQLite sinks the Tempest path uses.
+
+Three pieces, all managed as services on macOS:
+
+| Service | What | Managed by |
+|---|---|---|
+| `mosquitto` | MQTT broker on `:1883` (TCP) + `:9001` (WebSocket) | `brew services` |
+| `com.zigbee2mqtt` | native Z2M with frontend on `127.0.0.1:8088` | launchd agent |
+| `com.home-weather-hub.zigbee-subscriber` | the Python subscriber | launchd agent |
+
+### One-shot install
 
 ```sh
-# 1. Start broker + Z2M (LAN-only; no auth)
-ZIGBEE_ADAPTER_PATH=/dev/cu.usbserial-220 docker compose up -d
-# Z2M web UI: http://localhost:8080  (use it to pair sensors)
-
-# 2. Run the subscriber against the broker
-uv run zigbee-subscriber                                  # default 127.0.0.1:1883
-uv run zigbee-subscriber --broker-host 192.168.4.10       # remote broker
-uv run zigbee-subscriber --no-db                          # JSONL only
+# Plug the ZBDongle-E in first
+ZIGBEE_ADAPTER_PATH=/dev/cu.usbserial-220 scripts/install-zigbee-native.sh
 ```
 
-JSONL files rotate daily as `data/zigbee-YYYY-MM-DD.jsonl` (envelope: `{received_at, topic, friendly_name, sensor_id, payload}`); decoded numeric fields land in `observations` and the daily/monthly rollups keyed by `sensor_id = snzb:<ieee_address>`.
+The installer is idempotent — it `brew install`s `node@24` + `mosquitto`, clones+builds Zigbee2MQTT to `~/zigbee2mqtt`, drops a starter `configuration.yaml`, templates the launchd plists in `scripts/launchd/` with the local `$HOME` / repo path, and bootstraps both agents. Re-running is safe; it'll only redo the steps that aren't already in the desired state.
+
+### Operational commands
+
+```sh
+brew services list                                            # mosquitto status
+launchctl list | grep -E 'zigbee|home-weather'                # agent status (- pid label)
+tail -f ~/zigbee2mqtt/data/launchd.log                        # Z2M log
+tail -f data/zigbee-subscriber.launchd.log                    # subscriber log
+launchctl bootout gui/$UID ~/Library/LaunchAgents/com.zigbee2mqtt.plist               # stop Z2M
+launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.zigbee2mqtt.plist             # start Z2M
+```
+
+### Pairing a new sensor
+
+Open `http://127.0.0.1:8088` (or expose it over the tailnet with `tailscale serve --bg --https=8088 http://127.0.0.1:8088`), toggle "Permit join" on, factory-reset the device. Or skip the UI entirely and use the Z2M MQTT API:
+
+```sh
+mosquitto_pub -t zigbee2mqtt/bridge/request/permit_join -m '{"value":true,"time":254}'
+mosquitto_pub -t zigbee2mqtt/bridge/request/device/rename \
+  -m '{"from":"0xa4c138aabbccdd","to":"indoors"}'
+```
+
+JSONL files rotate daily as `data/zigbee-YYYY-MM-DD.jsonl` (envelope: `{received_at, topic, friendly_name, sensor_id, payload}`); decoded numeric fields land in `observations` and the daily/monthly rollups keyed by `sensor_id = snzb:<ieee_address>`. Renaming a device does **not** change the sensor_id, so historical data survives renames.
 
 Field mapping (Z2M payload → schema metric):
 
@@ -63,7 +90,15 @@ Field mapping (Z2M payload → schema metric):
 | `voltage` | `battery_v` | converted from mV |
 | `linkquality` | `link_quality` | 0–255 |
 
-**macOS dev caveat:** OrbStack/Docker on macOS can't pass through a host `/dev/cu.*` tty to a Linux container. For local dev either (a) run Z2M natively on the Mac (`npm` install) pointing at the dockerised Mosquitto, or (b) run the whole stack on the Mac Mini deploy target where Linux USB passthrough works. The subscriber doesn't care — it just connects to a broker.
+### Running the subscriber by hand
+
+The launchd agent is the supported path, but for ad-hoc work:
+
+```sh
+uv run zigbee-subscriber                              # default 127.0.0.1:1883
+uv run zigbee-subscriber --broker-host 192.168.4.10   # remote broker
+uv run zigbee-subscriber --no-db                      # JSONL only
+```
 
 ## Aggregate storage
 

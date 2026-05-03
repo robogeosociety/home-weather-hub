@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Zigbee2MQTT (native) launch agent.
+
+  Installed at ~/Library/LaunchAgents/com.zigbee2mqtt.plist by
+  scripts/install-zigbee-native.sh, which sed-templates @@HOME@@ with the
+  installer's $HOME at install time.
+
+  Manage:
+    launchctl print gui/$UID/com.zigbee2mqtt
+    launchctl bootout gui/$UID ~/Library/LaunchAgents/com.zigbee2mqtt.plist
+    launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.zigbee2mqtt.plist
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.zigbee2mqtt</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/opt/node@24/bin/node</string>
+    <string>@@HOME@@/zigbee2mqtt/index.js</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>@@HOME@@/zigbee2mqtt</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/opt/node@24/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    <key>NODE_ENV</key>
+    <string>production</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <!-- Don't tight-loop if Mosquitto isn't up yet on boot. -->
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <key>StandardOutPath</key>
+  <string>@@HOME@@/zigbee2mqtt/data/launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>@@HOME@@/zigbee2mqtt/data/launchd.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>

@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  home-weather-hub Zigbee subscriber launch agent.
+
+  Reads MQTT from the local broker, writes JSONL + SQLite into the repo's
+  ./data directory.
+
+  Installed at ~/Library/LaunchAgents/com.home-weather-hub.zigbee-subscriber.plist
+  by scripts/install-zigbee-native.sh, which sed-templates @@HOME@@ and
+  @@REPO_DIR@@ at install time.
+
+  Manage:
+    launchctl print gui/$UID/com.home-weather-hub.zigbee-subscriber
+    launchctl bootout gui/$UID ~/Library/LaunchAgents/com.home-weather-hub.zigbee-subscriber.plist
+    launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.home-weather-hub.zigbee-subscriber.plist
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.home-weather-hub.zigbee-subscriber</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>@@UV_BIN@@</string>
+    <string>run</string>
+    <string>zigbee-subscriber</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>@@REPO_DIR@@</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>@@HOME@@/.local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    <key>HOME</key>
+    <string>@@HOME@@</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- aiomqtt raises on broker disconnect rather than auto-reconnecting; we
+       intentionally rely on launchd to respawn instead of growing an
+       in-process reconnect loop. The Z2M catalog re-seeds from the retained
+       bridge/devices topic on every reconnect, so nothing is lost. -->
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <key>StandardOutPath</key>
+  <string>@@REPO_DIR@@/data/zigbee-subscriber.launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>@@REPO_DIR@@/data/zigbee-subscriber.launchd.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>
