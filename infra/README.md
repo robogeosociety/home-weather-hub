@@ -2,6 +2,8 @@
 
 Snapshot of the live home-stack infrastructure on `tommys-mac-mini`. **These files are checked-in copies** — the running services read from the runtime paths below, not from this directory. If you edit a file here, you also need to copy it to its runtime path (and vice versa, if you change a runtime file).
 
+> A Terraform-managed mirror of this same stack lives in `terraform/`. It's the long-term source of truth; the compose files here are the rollback path. See `terraform/README.md` for the import workflow that adopts the running containers without losing data.
+
 ## What runs where
 
 | Service | Image / runtime | Runtime path | Port |
