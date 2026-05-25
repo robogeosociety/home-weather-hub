@@ -1,5 +1,7 @@
 # home-weather-hub
 
+Deployed dashboards · [grafana-local](https://github.com/tommyroar/home-weather-hub/deployments/grafana-local) · [grafana-tailnet](https://github.com/tommyroar/home-weather-hub/deployments/grafana-tailnet) · [influxdb-local](https://github.com/tommyroar/home-weather-hub/deployments/influxdb-local) · [influxdb-tailnet](https://github.com/tommyroar/home-weather-hub/deployments/influxdb-tailnet)
+
 Live home-climate observability for Tommy's house. Outdoor weather (Tempest UDP) and indoor Zigbee climate flow into a self-hosted **InfluxDB** on a Mac Mini, are visualized in **Grafana**, and are reachable from the LAN and over **Tailscale**.
 
 ## Goal
