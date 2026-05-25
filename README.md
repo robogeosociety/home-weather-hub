@@ -1,108 +1,84 @@
 # home-weather-hub
-Monitor outside and inside climate and host a live dashboard on the local network
 
-## Objective
-- Monitor my [Tempest](https://shop.tempest.earth/products/tempest) outside weather station updates over UDP
-- Monitor my internal climate using a zigbee network over mqtt
-- Host a containerized web application on my Mac Mini M1 that displays a live dashboard of my inside and outside climate
-- (Stretch goal) incorporate a live webcam as the background for the webapp co-sited with the Tempest
+Live home-climate observability for Tommy's house. Outdoor weather (Tempest UDP) and indoor Zigbee climate flow into a self-hosted **InfluxDB** on a Mac Mini, are visualized in **Grafana**, and are reachable from the LAN and over **Tailscale**.
 
-## Status
+## Goal
 
-| Area | Status |
-|---|---|
-| Tempest UDP listener (`asyncio.DatagramProtocol`) | ✅ Implemented — `src/home_weather_hub/tempest_listener.py` |
-| Daily-rotated JSONL writer with malformed-packet handling | ✅ Implemented |
-| `tempest-listener` CLI (`uv run tempest-listener`) | ✅ Implemented |
-| SQLite observation + monthly/daily aggregate store | ✅ Implemented — `src/home_weather_hub/storage/` |
-| `tempest-stats` CLI (`uv run tempest-stats`) | ✅ Implemented |
-| Test pyramid (unit / integration / e2e) | ✅ 35 tests, all passing |
-| Lint + format (`ruff`) | ✅ Configured |
-| Zigbee/MQTT subscriber for indoor sensors (SNZB-02WD) | ⏳ Not started — schema is sensor-agnostic and ready |
-| Dashboard web app | ⏳ Not started |
-| Containerized deployment to Mac Mini M1 | ⏳ Not started |
-| Webcam backdrop (stretch) | ⏳ Not started |
+Replace the original "build it from scratch" approach with **Home Assistant on a Raspberry Pi + InfluxDB + Grafana on the Mac Mini**:
 
-**Known field issue (2026-05-02):** the Tempest hub at `192.168.4.20` is healthy and broadcasting `hub_status` every ~10s, but the outdoor device itself isn't transmitting (`obs_st`/`rapid_wind`/`device_status` absent). Likely battery or sub-GHz radio link — needs checking in the WeatherFlow app before useful sample data can be collected.
+- HA (running on a dedicated Pi running HAOS) is the universal capture layer for both outdoor weather and indoor Zigbee climate.
+- The Mac Mini hosts the time-series store, the dashboards, and the network exposure.
+- The custom Python listener and SQLite aggregator that started this repo are kept as a stopgap and as the canonical decoder reference, but they are no longer the data path of record.
 
-## Quick start
+## Current state
 
-```sh
-uv sync                              # install runtime + dev deps
-uv run tempest-listener              # bind 0.0.0.0:50222, write JSONL + SQLite to ./data/
-uv run tempest-listener --port 50222 --data-dir ./data --db-path ./data/weather.db
-uv run tempest-listener --no-db      # JSONL only (skip the aggregate DB)
-```
-
-Stop with `Ctrl-C`; SIGINT/SIGTERM trigger a clean drain + close. Each `obs_st` packet is JSONL-appended **and** decoded into the SQLite aggregate store; raw packets land in `./data/*.jsonl` (gitignored), one record per line as `{received_at, src_addr, payload}`.
-
-## Aggregate storage
-
-`data/weather.db` (SQLite, WAL mode) holds everything the dashboard will query. Schema:
-
-| Table | Grain | Purpose |
-|---|---|---|
-| `sensors` | one row per device | sensor catalog (`tempest:<serial>`, `snzb:<ieee>`, …) — first/last seen, location |
-| `observations` | one row per `(sensor, metric, ts)` | per-sample raw decoded values (Tempest `obs_st` fields) |
-| `daily_aggregates` | `(day, sensor, metric)` | min/max/sum/count + min_ts/max_ts; updated incrementally |
-| `monthly_aggregates` | `(year_month, sensor, metric)` | same shape, monthly bucket |
-| `lightning_strikes` | one row per `evt_strike` packet | per-strike `distance_km` (from station — Tempest reports no bearing) and unitless `energy` |
-| `strikes_with_location` (view) | per strike, joined to sensor lat/lng | what the dashboard reads to render strikes as a circle around the station |
-
-Mean = `sum_value / count`. The aggregator uses `INSERT OR IGNORE` on observations so duplicate `(sensor, metric, ts)` records don't double-count in the rollups. Strikes are idempotent on `(sensor_id, ts)`. Future MQTT/Zigbee data drops into the same tables — no schema changes.
-
-### Station config (lat/lng)
-
-Per-host station metadata lives in `config/stations.toml` (gitignored — copy from `config/stations.example.toml`). The listener reads it at startup and seeds the `sensors` table; per-packet writes use `COALESCE` so they never clobber the seeded label/location/lat/lng.
-
-```toml
-# config/stations.toml
-[[stations]]
-sensor_id = "tempest:ST-00027770"
-kind      = "tempest"
-label     = "Backyard Tempest"
-location  = "outside"
-latitude  = 47.6062
-longitude = -122.3321
-```
-
-The Tempest itself reports strike distance only (no bearing), so the station's known coordinates are the only spatial anchor — they let the dashboard render a strike as `(station_lat, station_lng) ± distance_km`. Pass `--stations <path>` to the listener to override.
-
-Inspect with the bundled CLI or plain `sqlite3`:
-
-```sh
-uv run tempest-stats                                    # current month, all metrics
-uv run tempest-stats --month 2026-04                    # specific month
-uv run tempest-stats --metric air_temp_c                # one metric
-uv run tempest-stats --last-days 30 --metric air_temp_c # daily series
-uv run tempest-stats --strikes                          # all individual strikes (newest first)
-uv run tempest-stats --strikes --last-days 7            # strikes in the last week
-sqlite3 data/weather.db "SELECT * FROM monthly_aggregates LIMIT 10"
-```
-
-## Tests
-
-The UDP collector has a full testing pyramid, with each level filterable by pytest marker:
-
-| Marker | Tests | What it covers | Speed |
+| Component | Status | Runs in | Notes |
 |---|---|---|---|
-| `unit` | 29 | `JsonlWriter`, `TempestProtocol.datagram_received` (envelope, malformed-packet handling, dedupe), `decode_obs_st` (metric mapping, null slots, malformed payloads), and `Aggregator` (min/max/sum/count math, day & month boundaries, sensor isolation, idempotent dupes). No sockets. | <0.2s |
-| `integration` | 5 | Real `asyncio` UDP endpoint on a free loopback port + real `JsonlWriter` writing to `tmp_path`, plus end-to-end through the SQLite aggregator. Sends datagrams via `socket.sendto` and asserts both file and DB contents. | <0.5s |
-| `e2e` | 1 | Spawns `python -m home_weather_hub.tempest_listener` as a subprocess, sends a datagram, sends SIGINT, and asserts a clean exit, the `"shutting down"` log line, and a valid JSONL file. | ~1s |
+| InfluxDB 2.7 (data store) | ✅ Live | OrbStack container, `/Volumes/dev/influxdb/` | Buckets: `tempest_archive`, `home_assistant`, `zigbee_archive`. Infinite retention. |
+| Grafana 11.3 (dashboards) | ✅ Live | OrbStack container, `/Volumes/dev/grafana/` | Provisioned datasources + 7-panel `Tempest — Basic` dashboard (uid `tempest-basic`). |
+| Tempest UDP → InfluxDB bridge | ✅ Live (stopgap) | Python via LaunchAgent, `~/.local/share/tempest-bridge/` | Mirrors what HA will do once it's up. Retire when HA takes over. |
+| Daily InfluxDB backup | ✅ Live | LaunchAgent, 03:30 daily | 30-day retention to `/Volumes/dev/influxdb/backups/` |
+| Tailscale exposure | ✅ Live | tailscale-serve, ports 3000 + 8086 | HTTPS terminated on the tailnet edge |
+| Playwright validation | ✅ 5/5 pass | `infra/grafana/playwright/` | API + datasource + provisioning + data presence + browser render |
+| Home Assistant on Raspberry Pi | ⏳ Flashing HAOS | (Pi) | WeatherFlow + Zigbee2MQTT integrations; pushes to `home_assistant` |
+| Zigbee indoor sensor (SNZB-02WD) | ⚠️ Offline since 2026-05-17 | Will reattach via HA on Pi | Battery suspected; HA's Z2M add-on will own it |
+| Webcam backdrop (stretch) | ⏳ Idea only | TBD | Lovelace picture-elements card or Grafana background |
 
-Run them:
+Live data right now: Tempest `ST-00204728` writing one `obs_st` per 60s plus `rapid_wind` every 3s into `tempest_archive`. Battery ~2.63V — bottom third of healthy range, watch it.
 
-```sh
-uv run pytest                # everything (35 tests, ~0.8s total)
-uv run pytest -m unit        # fast feedback loop while editing the listener
-uv run pytest -m integration # exercises the real asyncio + socket + sqlite path
-uv run pytest -m e2e         # exercises the CLI end-to-end
+## Access
+
+| URL | Purpose |
+|---|---|
+| http://tommys-mac-mini.local:3001/d/tempest-basic | Grafana dashboard, LAN |
+| https://tommys-mac-mini.tail59a169.ts.net:3000/d/tempest-basic | Grafana dashboard, Tailscale |
+| http://tommys-mac-mini.local:8086/ | InfluxDB UI, LAN |
+| https://tommys-mac-mini.tail59a169.ts.net:8086/ | InfluxDB UI, Tailscale |
+| https://github.com/tommyroar/home-weather-hub/deployments | All four as clickable GitHub deployments |
+
+Credentials live in three chmod-600 `.env` files on the host (`/Volumes/dev/influxdb/.env`, `/Volumes/dev/grafana/.env`, `~/.local/share/tempest-bridge/.env`). They're gitignored. See [`infra/README.md`](infra/README.md) for layout, `.env.example` files, and reproducible setup from a clean machine.
+
+## Repo layout
+
+```
+home-weather-hub/
+├── src/home_weather_hub/   # Original Python: Tempest decoder, listener,
+│                           # SQLite aggregator, CLIs. The decoder still
+│                           # drives the running bridge.
+├── tests/                  # pytest suite for the Python module
+├── infra/                  # Snapshot of the OrbStack + LaunchAgent +
+│                           # Playwright config running on tommys-mac-mini
+└── pyproject.toml          # uv-managed Python project
 ```
 
-## Lint & format
+## Migration plan
+
+1. **Now** — Mac Mini hosts InfluxDB + Grafana; Python bridge fills `tempest_archive`. HAOS being flashed onto the Pi.
+2. **Next** — HA on the Pi listens for the same Tempest UDP broadcasts; HA's InfluxDB integration pushes entity states to `home_assistant`. Optionally route Zigbee entities to `zigbee_archive` via include filters in HA.
+3. **Then** — Decommission the Mac-side Python bridge (`launchctl bootout` + remove `~/.local/share/tempest-bridge/`). Add a third Grafana datasource for `zigbee_archive`, grow dashboards.
+4. **Stretch** — Webcam co-sited with the Tempest, rendered as a Lovelace card backdrop in HA or embedded in Grafana.
+
+## Working with the Python module
+
+The Tempest decoder (`src/home_weather_hub/decoders/tempest.py`) is the canonical reference for `obs_st` and `evt_strike` payload shapes — the live bridge in `infra/tempest-bridge/tempest_to_influx.py` mirrors its logic. The SQLite aggregator under `src/home_weather_hub/storage/` is no longer the data path of record; observations flow into InfluxDB now. The CLIs (`tempest-listener`, `tempest-stats`, `tempest-monitor`) still build and run but are not part of the current pipeline.
 
 ```sh
-uv run ruff check .          # lint
-uv run ruff check --fix .    # lint + autofix
-uv run ruff format .         # format
+uv sync                       # install runtime + dev deps
+uv run pytest                 # 54 tests, ~1s total
+uv run ruff check .           # lint
+uv run ruff format .          # format
+```
+
+### Tests
+
+| Marker | Tests | Speed | What it covers |
+|---|---|---|---|
+| `unit` | 47 | <0.2s | `JsonlWriter`, `TempestProtocol.datagram_received` (envelope, dedupe), decoders, `Aggregator` math + idempotency, config loader |
+| `integration` | 6 | <0.5s | Real asyncio UDP endpoint, real `JsonlWriter`, end-to-end through the SQLite aggregator (with and without DB sink) |
+| `e2e` | 1 | ~1s | `python -m home_weather_hub.tempest_listener` subprocess + SIGINT clean shutdown |
+
+```sh
+uv run pytest -m unit         # fast feedback while editing the decoder
+uv run pytest -m integration  # real socket + sqlite path
+uv run pytest -m e2e          # CLI end-to-end
 ```
