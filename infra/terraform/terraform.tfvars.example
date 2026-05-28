@@ -1,0 +1,19 @@
+# Copy to terraform.tfvars (gitignored) and fill in. Most of these mirror the
+# values already in /Volumes/dev/influxdb/.env and /Volumes/dev/grafana/.env —
+# reuse them verbatim if you're adopting the running stack via `terraform import`.
+
+influx_admin_user      = "admin"
+influx_admin_password  = "<32-char random>"
+influx_admin_token     = "<64-char random — must match the value baked into the running container>"
+influx_org             = "home"
+influx_initial_bucket  = "home_assistant"
+
+grafana_admin_user     = "admin"
+grafana_admin_password = "<32-char random>"
+
+# Optional overrides — leave commented unless you have a reason.
+# influx_host_port  = 8086
+# grafana_host_port = 3001
+# influxdb_image    = "influxdb:2.7-alpine"
+# grafana_image     = "grafana/grafana-oss:11.3.0"
+# archive_buckets   = ["tempest_archive", "zigbee_archive"]
