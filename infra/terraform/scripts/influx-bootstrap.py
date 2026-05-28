@@ -29,8 +29,8 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 
 def env(name: str) -> str:
@@ -57,10 +57,16 @@ TOKEN_DESCRIPTIONS = {
 def influx(*args: str) -> str:
     """Run `influx` inside the container, return stdout (raises on non-zero)."""
     cmd = [
-        "docker", "exec", "-i", CONTAINER,
-        "influx", *args,
-        "--token", ADMIN_TOKEN,
-        "--org", ORG,
+        "docker",
+        "exec",
+        "-i",
+        CONTAINER,
+        "influx",
+        *args,
+        "--token",
+        ADMIN_TOKEN,
+        "--org",
+        ORG,
     ]
     result = subprocess.run(cmd, check=True, capture_output=True, text=True)
     return result.stdout

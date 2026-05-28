@@ -14,13 +14,13 @@ Run:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
 import signal
 import socket
 import sys
-import time
 import urllib.error
 import urllib.request
 
@@ -100,9 +100,7 @@ def decode_evt_strike(payload: dict) -> list[str]:
         return []
     tags = f"sensor_id={_esc_tag(f'tempest:{serial}')}"
     return [
-        f"lightning_strike,{tags} "
-        f"distance_km={float(distance)},energy={int(energy)}i "
-        f"{int(ts)}"
+        f"lightning_strike,{tags} distance_km={float(distance)},energy={int(energy)}i {int(ts)}"
     ]
 
 
@@ -118,9 +116,7 @@ def decode_rapid_wind(payload: dict) -> list[str]:
         return []
     tags = f"sensor_id={_esc_tag(f'tempest:{serial}')}"
     return [
-        f"wind_rapid,{tags} "
-        f"wind_avg_mps={float(speed)},wind_dir_deg={float(direction)} "
-        f"{int(ts)}"
+        f"wind_rapid,{tags} wind_avg_mps={float(speed)},wind_dir_deg={float(direction)} {int(ts)}"
     ]
 
 
@@ -161,10 +157,8 @@ def main() -> int:
 
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    try:
+    with contextlib.suppress(OSError):
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-    except OSError:
-        pass
     s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     s.bind(("0.0.0.0", port))
 
@@ -183,7 +177,7 @@ def main() -> int:
     while not stop:
         try:
             data, addr = s.recvfrom(65535)
-        except socket.timeout:
+        except TimeoutError:
             continue
         try:
             payload = json.loads(data)
