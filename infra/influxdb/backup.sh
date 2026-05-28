@@ -1,6 +1,7 @@
 #!/bin/zsh
 # Daily InfluxDB backup. Run via LaunchAgent.
 # Strategy: dump inside the container to /tmp, docker cp to host, prune.
+# Off-host replication lives in backup-r2-sync.sh, scheduled 30 min later.
 
 set -eu
 

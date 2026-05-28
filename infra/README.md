@@ -12,6 +12,7 @@ Snapshot of the live home-stack infrastructure on `tommys-mac-mini`. **These fil
 | Grafana 11.3 | `grafana/grafana-oss:11.3.0` (OrbStack) | `/Volumes/dev/grafana/` | host `3001` → container `3000` |
 | Tempest UDP→InfluxDB bridge | Python 3 via launchd | `~/.local/share/tempest-bridge/` | UDP `50222` listener |
 | InfluxDB daily backup | shell script via launchd | `/Volumes/dev/influxdb/backup.sh` | n/a (03:30 daily) |
+| InfluxDB → R2 off-host sync | shell script via launchd | `/Volumes/dev/influxdb/backup-r2-sync.sh` | n/a (04:00 daily) |
 
 LaunchAgents are loaded from `~/Library/LaunchAgents/`. Service plists in `launchd/` are committed copies; load with `launchctl bootstrap gui/$UID <path>`.
 
@@ -21,8 +22,9 @@ LaunchAgents are loaded from `~/Library/LaunchAgents/`. Service plists in `launc
 infra/
 ├── influxdb/
 │   ├── docker-compose.yml      # InfluxDB 2.7 + named volumes
-│   ├── backup.sh               # daily backup via docker exec/cp
-│   └── .env.example            # admin creds + service tokens (real .env gitignored)
+│   ├── backup.sh               # daily backup via docker exec/cp (03:30)
+│   ├── backup-r2-sync.sh       # rclone copy backups/ → Cloudflare R2 (04:00)
+│   └── .env.example            # admin creds, service tokens, R2 creds (real .env gitignored)
 ├── grafana/
 │   ├── docker-compose.yml      # Grafana on shared influxdb_default network
 │   ├── provisioning/
@@ -38,7 +40,8 @@ infra/
 │   └── .env.example
 └── launchd/
     ├── dev.tommydoerr.tempest-bridge.plist
-    └── dev.tommydoerr.influxdb-backup.plist
+    ├── dev.tommydoerr.influxdb-backup.plist
+    └── dev.tommydoerr.influxdb-backup-r2-sync.plist
 ```
 
 ## Setup from scratch
@@ -64,11 +67,14 @@ cp infra/tempest-bridge/.env.example ~/.local/share/tempest-bridge/.env
 chmod 700 ~/.local/share/tempest-bridge/{bridge.sh,tempest_to_influx.py}
 chmod 600 ~/.local/share/tempest-bridge/.env
 
-# LaunchAgents (auto-restart bridge + daily backups)
+# LaunchAgents (auto-restart bridge + daily backups + R2 off-host sync)
 cp infra/launchd/*.plist ~/Library/LaunchAgents/
 launchctl bootstrap gui/$UID ~/Library/LaunchAgents/dev.tommydoerr.tempest-bridge.plist
 launchctl bootstrap gui/$UID ~/Library/LaunchAgents/dev.tommydoerr.influxdb-backup.plist
+launchctl bootstrap gui/$UID ~/Library/LaunchAgents/dev.tommydoerr.influxdb-backup-r2-sync.plist
 ```
+
+The R2 sync also needs `rclone` on the host (`brew install rclone`) and R2 credentials in `/Volumes/dev/influxdb/.env`. See "Cloudflare R2 off-host backup" below.
 
 ## Minting service tokens
 
@@ -87,6 +93,44 @@ docker exec influxdb influx auth create --org "$INFLUX_ORG" --token "$INFLUX_ADM
 docker exec influxdb influx auth create --org "$INFLUX_ORG" --token "$INFLUX_ADMIN_TOKEN" \
   --read-bucket <tempest_archive id> --read-bucket <home_assistant id> --read-bucket <zigbee_archive id> \
   --description "grafana read"
+```
+
+## Cloudflare R2 off-host backup
+
+`backup-r2-sync.sh` runs daily at 04:00 (30 minutes after `backup.sh`) and uses `rclone copy` to push everything in `/Volumes/dev/influxdb/backups/` to the `influxdb-backups` R2 bucket. `copy` (not `sync`) means R2 never deletes — once a snapshot is up there it stays, even after the local 30-day prune removes it from disk. Backups are ~16KB/day; thousands of years' worth fit in R2's free tier.
+
+One-time setup on a fresh host:
+
+```sh
+# 1. rclone — single static binary, ~50 MB.
+brew install rclone
+
+# 2. Mint an R2 API token in the Cloudflare dashboard:
+#    https://dash.cloudflare.com/?to=/:account/r2/api-tokens
+#    Permission: Object Read & Write
+#    Scope: bucket = influxdb-backups
+#    Note the Access Key ID and Secret Access Key — the secret is shown once.
+
+# 3. Append the three R2_* keys (see .env.example) to /Volumes/dev/influxdb/.env.
+
+# 4. Smoke-test the sync manually before scheduling it.
+/Volumes/dev/influxdb/backup-r2-sync.sh
+
+# 5. Schedule.
+cp infra/launchd/dev.tommydoerr.influxdb-backup-r2-sync.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$UID ~/Library/LaunchAgents/dev.tommydoerr.influxdb-backup-r2-sync.plist
+```
+
+Logs land at `/Volumes/dev/influxdb/backup-r2-sync.log`. To inspect what's in R2:
+
+```sh
+source /Volumes/dev/influxdb/.env
+export RCLONE_CONFIG_R2_TYPE=s3 RCLONE_CONFIG_R2_PROVIDER=Cloudflare \
+  RCLONE_CONFIG_R2_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID" \
+  RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY" \
+  RCLONE_CONFIG_R2_ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+rclone lsf r2:influxdb-backups --dirs-only       # one entry per snapshot
+rclone size r2:influxdb-backups                   # total stored bytes
 ```
 
 ## Validating
