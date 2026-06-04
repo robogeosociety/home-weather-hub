@@ -62,3 +62,11 @@ These apply to every project under `~/dev` and are easy to forget when scaffoldi
 - **Dev servers** — Use the global `/dev` skill to start servers (it detects the stack and registers a GitHub Deployment). Use `/tailscale-serve <port>` to expose a port over the tailnet.
 - **Vite port registry** — If a Vite config is added, pick the next free port from `~/.claude/vite-ports.json` (range 5180–5199), record it there, and set both `server.port` and `server.strictPort: true`. Never kill a process on a port you didn't start.
 - **Long-running services vs Nomad** — The dashboard web server, MQTT subscriber, and UDP listener are services → run them as **OrbStack containers** on the Mac Mini, not Nomad jobs. Nomad in this workspace is reserved for scheduled production jobs with lifecycle hooks (see `~/dev/NOMAD.md`).
+## Pull requests — the "newspaper" framework
+
+PR descriptions follow the **newspaper / information-pyramid** format: one self-contained
+front page (kicker → headline → dek → masthead → why → what → mermaid flow → screens →
+verification → risk) that reads top-to-bottom on an iPad-mini portrait display (1–2 pages;
+up to 4 for very complex *code* changes). Rebuild from the **full** diff, never append.
+Full rules: <https://github.com/tommyroar/.github/blob/main/PR_FRAMEWORK.md>. CI validates
+the body via the `pr-newspaper` workflow (the reusable gate in `tommyroar/pr-newspaper`).
