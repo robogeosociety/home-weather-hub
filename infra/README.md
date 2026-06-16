@@ -10,7 +10,7 @@ Snapshot of the live home-stack infrastructure on `tommys-mac-mini`. **These fil
 |---|---|---|---|
 | InfluxDB 2.7 | `influxdb:2.7-alpine` (OrbStack) | `/Volumes/dev/influxdb/` | `8086` |
 | Grafana 11.3 | `grafana/grafana-oss:11.3.0` (OrbStack) | `/Volumes/dev/grafana/` | host `3001` → container `3000` |
-| Tempest UDP→InfluxDB bridge | Python 3 via launchd | `~/.local/share/tempest-bridge/` | UDP `50222` listener |
+| ~~Tempest UDP→InfluxDB bridge~~ **(retired 2026-06-14)** | Python 3 via launchd | `~/.local/share/tempest-bridge/` (plist now `.retired`) | superseded by HA weatherflow→influxdb |
 | InfluxDB daily backup | shell script via launchd | `/Volumes/dev/influxdb/backup.sh` | n/a (03:30 daily) |
 | InfluxDB → R2 off-host sync | shell script via launchd | `/Volumes/dev/influxdb/backup-r2-sync.sh` | n/a (04:00 daily) |
 
@@ -149,6 +149,10 @@ PATH="/opt/homebrew/opt/node@24/bin:$PATH" npx playwright test
 - **OrbStack port forwards can wedge on restart.** Grafana publishes host port `3001` → container `3000` because port `3000` got stuck in a "bind: address already in use" loop after an earlier restart. Switch back when convenient.
 - **Drift risk.** Changes made in-place at runtime paths won't update this repo. Best practice: edit here, copy to runtime, restart the affected service.
 
-## Migration target
+## Migration target — Tempest done (2026-06-14)
 
-The whole stack is a stopgap until Home Assistant on the Raspberry Pi takes over outdoor/indoor sensor capture. At that point: tear down the Tempest bridge, point HA's InfluxDB integration at the existing InfluxDB on this Mac, and let HA push to the `home_assistant` and `zigbee_archive` buckets. The Grafana datasources are already pre-wired for that handoff.
+The whole stack is a stopgap until Home Assistant on the Raspberry Pi takes over outdoor/indoor sensor capture.
+
+**Tempest handoff complete:** HA's `weatherflow` integration (device `st_00204728`) now exports to InfluxDB's `home_assistant` bucket via HA's `influxdb` integration (`measurement_attr: entity_id`, so each metric is `sensor.st_00204728_<x>`/`value`, in HA display units). The `tempest-bridge` launchd job was **retired** (booted out + disabled; plist kept as `.retired`). The Grafana `Tempest — Basic` dashboard, the `freshness-tempest` alert, and the ops freshness/status panels were repointed to `home_assistant`. The `tempest_archive` bucket is now a **frozen historical archive** (no backfill; R2-backed) — only the two per-strike lightning panels still read it.
+
+**Still pending:** the indoor/Zigbee side now runs through HA's **ZHA** integration (Sonoff dongle) → `home_assistant` bucket as sensors are paired; `zigbee_archive` is reserved for that. The bridge teardown above is the outdoor half.
