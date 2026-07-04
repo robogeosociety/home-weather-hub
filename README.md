@@ -1,6 +1,6 @@
 # home-weather-hub
 
-Deployed dashboards · [grafana-local](https://github.com/tommyroar/home-weather-hub/deployments/grafana-local) · [grafana-tailnet](https://github.com/tommyroar/home-weather-hub/deployments/grafana-tailnet) · [influxdb-local](https://github.com/tommyroar/home-weather-hub/deployments/influxdb-local) · [influxdb-tailnet](https://github.com/tommyroar/home-weather-hub/deployments/influxdb-tailnet)
+Deployed dashboards · [grafana-local](https://github.com/robogeosociety/home-weather-hub/deployments/grafana-local) · [grafana-tailnet](https://github.com/robogeosociety/home-weather-hub/deployments/grafana-tailnet) · [influxdb-local](https://github.com/robogeosociety/home-weather-hub/deployments/influxdb-local) · [influxdb-tailnet](https://github.com/robogeosociety/home-weather-hub/deployments/influxdb-tailnet)
 
 Live home-climate observability for Tommy's house. Outdoor weather (Tempest UDP) and indoor Zigbee climate flow into a self-hosted **InfluxDB** on a Mac Mini, are visualized in **Grafana**, and are reachable from the LAN and over **Tailscale**.
 
@@ -36,7 +36,7 @@ Live data right now: Tempest `ST-00204728` writing one `obs_st` per 60s plus `ra
 | https://tommys-mac-mini.tail59a169.ts.net:3000/d/tempest-basic | Grafana dashboard, Tailscale |
 | http://tommys-mac-mini.local:8086/ | InfluxDB UI, LAN |
 | https://tommys-mac-mini.tail59a169.ts.net:8086/ | InfluxDB UI, Tailscale |
-| https://github.com/tommyroar/home-weather-hub/deployments | All four as clickable GitHub deployments |
+| https://github.com/robogeosociety/home-weather-hub/deployments | All four as clickable GitHub deployments |
 
 Credentials live in three chmod-600 `.env` files on the host (`/Volumes/dev/influxdb/.env`, `/Volumes/dev/grafana/.env`, `~/.local/share/tempest-bridge/.env`). They're gitignored. See [`infra/README.md`](infra/README.md) for layout, `.env.example` files, and reproducible setup from a clean machine.
 
